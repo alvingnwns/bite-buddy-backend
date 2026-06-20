@@ -261,8 +261,8 @@
 | 0.1 | Project Scaffolding | ✅ Selesai |
 | 0.2 | Database Schema | ✅ Selesai |
 | 0.3 | Supabase Client | ✅ Selesai |
-| 0.4 | Environment & Tooling | 🔧 Perlu manual setup |
-| 1 | Scan Food Endpoint | ❌ Belum dimulai |
+| 0.4 | Environment & Tooling | ✅ Selesai |
+| 1 | Scan Food Endpoint | [/] In Progress |
 | 2 | Scan Medicine Endpoint | ❌ Belum dimulai |
 | 3 | Gamification Service | ❌ Belum dimulai |
 | 4 | Compliance Worker | ❌ Belum dimulai |
