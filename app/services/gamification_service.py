@@ -73,7 +73,8 @@ class GamificationService:
                     "current_status": "neutral"
                 }
             
-            pet = response.data[0]
+            from typing import Any, cast
+            pet = cast(Dict[str, Any], response.data[0])
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

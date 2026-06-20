@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -74,7 +74,7 @@ async def scan_food(
         calories=total_calories,
         photo_url=public_url,
         notes=notes,
-        consumed_at=datetime.utcnow(),
+        consumed_at=datetime.now(timezone.utc),
     )
 
     client = get_supabase_client()
@@ -150,7 +150,7 @@ async def scan_medicine(
     from datetime import time
 
     # Untuk prototipe, kita asumsikan scheduled_time adalah jam saat ini
-    current_time = datetime.utcnow().time()
+    current_time = datetime.now(timezone.utc).time()
 
     log_data = MedicationLogCreate(
         child_id=child_id,
