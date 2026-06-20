@@ -41,20 +41,37 @@ class AIService:
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.post(
-                    HF_MODEL_URL,
-                    headers=self.headers,
-                    content=image_bytes,
-                )
+                # Implementasi Retry Logic dengan Exponential Backoff
+                # Sangat berguna untuk API gratis Hugging Face yang sering 'Cold Start'
+                max_retries = 3
+                base_delay = 2.0  # detik
 
-                # Jika model sedang loading/booting di server Hugging Face
-                if response.status_code == 503:
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail="Model AI sedang dimuat oleh server (Cold Start). Silakan coba lagi dalam 20 detik.",
+                for attempt in range(max_retries):
+                    response = await client.post(
+                        HF_MODEL_URL,
+                        headers=self.headers,
+                        content=image_bytes,
                     )
 
-                response.raise_for_status()
+                    # Jika model sedang loading (Cold Start) atau server sibuk
+                    if response.status_code == 503:
+                        if attempt < max_retries - 1:
+                            # Hitung exponential backoff: 2s, 4s, 8s...
+                            sleep_time = base_delay * (2 ** attempt)
+                            logger.info(f"Model HF sedang dimuat. Menunggu {sleep_time} detik (Percobaan {attempt+1}/{max_retries})...")
+                            import asyncio
+                            await asyncio.sleep(sleep_time)
+                            continue
+                        else:
+                            raise HTTPException(
+                                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                                detail="Model AI sedang dimuat oleh server (Cold Start). Silakan coba lagi nanti.",
+                            )
+                    
+                    # Jika statusnya sukses (2xx) atau error lain (4xx/5xx selain 503), keluar dari loop retry
+                    response.raise_for_status()
+                    break
+
                 data = response.json()
 
                 # Parse response. Format HF Image Classification biasanya:

@@ -48,38 +48,38 @@
 > Referensi: design.md § "Detect Food Flow"
 
 ### Fase 1.1 — Supabase Storage Service
-- [ ] `app/services/storage_service.py`
-  - [ ] Fungsi `upload_image_to_storage(file_bytes, bucket, filename)` → public URL
-  - [ ] Validasi file type (hanya gambar: jpg, png, webp)
-  - [ ] Validasi ukuran file (max 10MB)
-  - [ ] Generate unique filename (UUID-based)
-- [ ] Buat bucket `food-photos` di Supabase Storage (manual)
+- [x] `app/services/storage_service.py`
+  - [x] Fungsi `upload_image_to_storage(file_bytes, bucket, filename)` → public URL
+  - [x] Validasi file type (hanya gambar: jpg, png, webp)
+  - [x] Validasi ukuran file (max 10MB)
+  - [x] Generate unique filename (UUID-based)
+- [ ] ⚠️ Buat bucket `food-photos` di Supabase Storage (manual)
 
 ### Fase 1.2 — AI Inference Service (SegFormer)
-- [ ] `app/services/ai_service.py`
-  - [ ] Fungsi `detect_food(image_bytes)` → kirim ke Hugging Face SegFormer API
-  - [ ] Parse response segmentation → list food items
-  - [ ] Error handling: timeout, rate limit, API down
-  - [ ] Retry logic dengan exponential backoff
+- [x] `app/services/ai_service.py`
+  - [x] Fungsi `detect_food(image_bytes)` → kirim ke Hugging Face SegFormer API
+  - [x] Parse response segmentation → list food items
+  - [x] Error handling: timeout, rate limit, API down
+  - [x] Retry logic dengan exponential backoff
 
 ### Fase 1.3 — Multimodal Reasoning Service
-- [ ] `app/services/reasoning_service.py`
-  - [ ] Fungsi `estimate_nutrition(food_items: list)` → JSON output
-  - [ ] Output format: `{ "foods": [...], "total_calories": int, "total_carbs": float }`
-  - [ ] Lookup nutritional database / estimation logic
+- [x] `app/services/reasoning_service.py`
+  - [x] Fungsi `estimate_nutrition(food_items: list)` → JSON output
+  - [x] Output format: `{ "foods": [...], "total_calories": int, "total_carbs": float }`
+  - [x] Lookup nutritional database / estimation logic
 
 ### Fase 1.4 — Scan Food Endpoint
-- [ ] `app/api/v1/scan.py`
-  - [ ] `POST /api/v1/scan/food` — terima foto makanan
-  - [ ] Implementasi `asyncio.gather` untuk parallel processing:
+- [x] `app/api/v1/scan.py`
+  - [x] `POST /api/v1/scan/food` — terima foto makanan
+  - [x] Implementasi `asyncio.gather` untuk parallel processing:
     - Task A: Upload gambar ke Supabase Storage
     - Task B: Kirim gambar ke SegFormer AI
-  - [ ] Proses hasil AI lewat reasoning service
-  - [ ] Simpan ke tabel `food_logs`
-  - [ ] Trigger gamification logic (Fase 3)
-  - [ ] Return response dengan detail makanan & status pet
-- [ ] `app/api/v1/router.py` — register scan router
-- [ ] 📝 Handout: `md/handout_fitur_scan_food.md`
+  - [x] Proses hasil AI lewat reasoning service
+  - [x] Simpan ke tabel `food_logs`
+  - [ ] Trigger gamification logic (Fase 3 - Menyusul nanti)
+  - [x] Return response dengan detail makanan & status pet
+- [x] `app/api/v1/router.py` — register scan router
+- [x] 📝 Handout: `md/handout_fitur_scan_food.md`
 
 ---
 
@@ -262,7 +262,7 @@
 | 0.2 | Database Schema | ✅ Selesai |
 | 0.3 | Supabase Client | ✅ Selesai |
 | 0.4 | Environment & Tooling | ✅ Selesai |
-| 1 | Scan Food Endpoint | [/] In Progress |
+| 1 | Scan Food Endpoint | ✅ Selesai |
 | 2 | Scan Medicine Endpoint | ❌ Belum dimulai |
 | 3 | Gamification Service | ❌ Belum dimulai |
 | 4 | Compliance Worker | ❌ Belum dimulai |
