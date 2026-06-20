@@ -1,4 +1,7 @@
-/md
+
+
+# Editor
+.vscode/
 
 # Python
 __pycache__/
@@ -6,4 +9,6 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+bbb_venv/
+bbb-venv/
 .env
