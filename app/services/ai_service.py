@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 # klasifikasi gambar makanan / objek umum yang ringan.
 HF_MODEL_URL = "https://api-inference.huggingface.co/models/nateraw/food"
 
+# Model Object Detection/Classification untuk Obat/Insulin (Placeholder)
+# Pada produksi, gunakan model fine-tuned YOLOv8 khusus Insulin Pen
+HF_MEDICINE_MODEL_URL = "https://api-inference.huggingface.co/models/microsoft/resnet-50"
+
 
 class AIService:
     """Service untuk berinteraksi dengan model Kecerdasan Buatan (AI)."""
@@ -106,4 +110,73 @@ class AIService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Terjadi kesalahan internal pada layanan AI.",
             )
+
+    async def detect_medicine(self, image_bytes: bytes) -> str:
+        """
+        Mengirim gambar ke Hugging Face Inference API untuk mendeteksi tipe obat/insulin.
+
+        Args:
+            image_bytes: Byte gambar obat.
+
+        Returns:
+            str: Tipe obat yang terdeteksi (misal: 'NovoRapid Pen').
+        """
+        if not self.api_token:
+            logger.warning(
+                "HF_API_TOKEN kosong di .env. Menggunakan output MOCK untuk obat."
+            )
+            # MOCK OUTPUT
+            return "Insulin Pen (Mock)"
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                max_retries = 3
+                base_delay = 2.0
+
+                for attempt in range(max_retries):
+                    response = await client.post(
+                        HF_MEDICINE_MODEL_URL,
+                        headers=self.headers,
+                        content=image_bytes,
+                    )
+
+                    if response.status_code == 503:
+                        if attempt < max_retries - 1:
+                            sleep_time = base_delay * (2 ** attempt)
+                            logger.info(f"Model HF Obat sedang dimuat. Menunggu {sleep_time}s...")
+                            import asyncio
+                            await asyncio.sleep(sleep_time)
+                            continue
+                        else:
+                            raise HTTPException(
+                                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                                detail="Model AI Obat sedang dimuat. Coba lagi nanti.",
+                            )
+                    
+                    response.raise_for_status()
+                    break
+
+                data = response.json()
+
+                # Parse response. Untuk ResNet/Klasifikasi biasanya array of dicts.
+                if isinstance(data, list) and len(data) > 0:
+                    top_result = data[0]
+                    if isinstance(top_result, dict) and top_result.get("score", 0) > 0.1:
+                        # Di sistem produksi, label akan berupa "Lantus" atau "NovoRapid"
+                        return top_result.get("label", "Unknown Medicine")
+
+                return "Unknown Medicine"
+
+        except httpx.TimeoutException:
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="Waktu tunggu timeout saat menghubungi server AI Obat.",
+            )
+        except Exception as e:
+            logger.error(f"AI Service Medicine Error: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Terjadi kesalahan internal pada deteksi obat.",
+            )
+
 

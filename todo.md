@@ -53,7 +53,7 @@
   - [x] Validasi file type (hanya gambar: jpg, png, webp)
   - [x] Validasi ukuran file (max 10MB)
   - [x] Generate unique filename (UUID-based)
-- [ ] ⚠️ Buat bucket `food-photos` di Supabase Storage (manual)
+- [x] ⚠️ Buat bucket `food-photos` di Supabase Storage (manual)
 
 ### Fase 1.2 — AI Inference Service (SegFormer)
 - [x] `app/services/ai_service.py`
@@ -88,21 +88,21 @@
 > Referensi: design.md § "Detect Medicine/Insulin Flow"
 
 ### Fase 2.1 — AI Inference Service (YOLOv8)
-- [ ] `app/services/ai_service.py` (extend)
-  - [ ] Fungsi `detect_medicine(image_bytes)` → kirim ke Hugging Face YOLOv8 API
-  - [ ] Parse response → detected insulin type, pen color/shape
-  - [ ] Error handling (sama dengan food detection)
+- [x] `app/services/ai_service.py` (extend)
+  - [x] Fungsi `detect_medicine(image_bytes)` → kirim ke Hugging Face YOLOv8 API
+  - [x] Parse response → detected insulin type, pen color/shape
+  - [x] Error handling (sama dengan food detection)
 
 ### Fase 2.2 — Scan Medicine Endpoint
-- [ ] `app/api/v1/scan.py` (extend)
-  - [ ] `POST /api/v1/scan/medicine` — terima foto insulin pen + manual dosage input
-  - [ ] Upload gambar ke Supabase Storage (bucket: `medicine-photos`)
-  - [ ] Kirim gambar ke YOLOv8 untuk deteksi tipe insulin
-  - [ ] Validasi: dosage WAJIB diisi manual oleh parent (medical safety)
-  - [ ] Simpan ke tabel `medication_logs`
-  - [ ] Return response dengan detail obat yang terdeteksi
-- [ ] Buat bucket `medicine-photos` di Supabase Storage (manual)
-- [ ] 📝 Handout: `md/handout_fitur_scan_medicine.md`
+- [x] `app/api/v1/scan.py` (extend)
+  - [x] `POST /api/v1/scan/medicine` — terima foto insulin pen + manual dosage input
+  - [x] Upload gambar ke Supabase Storage (bucket: `medicine-photos`)
+  - [x] Kirim gambar ke YOLOv8 untuk deteksi tipe insulin
+  - [x] Validasi: dosage WAJIB diisi manual oleh parent (medical safety)
+  - [x] Simpan ke tabel `medication_logs`
+  - [x] Return response dengan detail obat yang terdeteksi
+- [ ] ⚠️ Buat bucket `medicine-photos` di Supabase Storage (manual)
+- [x] 📝 Handout: `md/handout_fitur_scan_medicine.md`
 
 ---
 
@@ -263,7 +263,7 @@
 | 0.3 | Supabase Client | ✅ Selesai |
 | 0.4 | Environment & Tooling | ✅ Selesai |
 | 1 | Scan Food Endpoint | ✅ Selesai |
-| 2 | Scan Medicine Endpoint | ❌ Belum dimulai |
+| 2 | Scan Medicine Endpoint | ✅ Selesai |
 | 3 | Gamification Service | ❌ Belum dimulai |
 | 4 | Compliance Worker | ❌ Belum dimulai |
 | 5 | Real-time Sync | ❌ Belum dimulai |

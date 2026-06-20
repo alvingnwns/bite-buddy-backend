@@ -100,3 +100,86 @@ async def scan_food(
         },
     }
 
+
+@router.post("/medicine")
+async def scan_medicine(
+    child_id: UUID = Form(...),
+    administered_by: UUID = Form(...),
+    dosage: float = Form(..., gt=0, description="Dosis obat wajib diisi manual demi keamanan"),
+    dosage_unit: str = Form(..., description="Satuan dosis, misal: 'IU' untuk insulin"),
+    file: UploadFile = File(...),
+    route: str = Form("subcutaneous", description="Rute pemberian (oral, subcutaneous, dll)"),
+    notes: Optional[str] = Form(None),
+) -> dict:
+    """
+    Endpoint untuk memindai obat/insulin pen.
+    AI hanya bertugas mendeteksi JENIS obat. Dosis WAJIB diisi manual oleh pengguna.
+    Menggunakan asyncio.gather untuk upload dan inferensi paralel.
+    """
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="File tidak ditemukan"
+        )
+
+    file_bytes = await file.read()
+
+    # Parallel Processing
+    try:
+        upload_task = storage_service.upload_image(
+            file_bytes=file_bytes, filename=file.filename, bucket_name="medicine-photos"
+        )
+        ai_task = ai_service.detect_medicine(image_bytes=file_bytes)
+
+        public_url, detected_medicine = await asyncio.gather(upload_task, ai_task)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Terjadi kesalahan saat memproses gambar obat: {str(e)}",
+        )
+
+    # Simpan ke Database (Tabel medication_logs)
+    from app.models.database import MedicationLogCreate
+    from datetime import time
+
+    # Untuk prototipe, kita asumsikan scheduled_time adalah jam saat ini
+    current_time = datetime.utcnow().time()
+
+    log_data = MedicationLogCreate(
+        child_id=child_id,
+        administered_by=administered_by,
+        medication_name=detected_medicine,
+        dosage=dosage,
+        dosage_unit=dosage_unit,
+        route=route,
+        scheduled_time=current_time,
+        was_taken=True,
+        notes=notes,
+    )
+
+    client = get_supabase_client()
+    try:
+        # Menyisipkan catatan obat, tapi di skema tabel kita tidak ada photo_url di medication_logs
+        # Jika butuh menyimpan foto, kita bisa simpan public_url di 'notes' untuk sementara
+        # atau merubah skema DB nanti.
+        final_notes = f"[Photo URL: {public_url}] {notes if notes else ''}".strip()
+        db_log_data = log_data.model_dump(mode="json")
+        db_log_data["notes"] = final_notes
+
+        result = client.table("medication_logs").insert(db_log_data).execute()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Gagal menyimpan data obat ke database: {str(e)}",
+        )
+
+    return {
+        "status": "success",
+        "message": "Obat berhasil dideteksi dan dicatat",
+        "data": {
+            "medication_detected": detected_medicine,
+            "dosage_recorded": f"{dosage} {dosage_unit}",
+            "photo_url": public_url,
+            "database_record": result.data[0] if result.data else None,
+        },
+    }
+
