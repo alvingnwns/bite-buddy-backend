@@ -14,10 +14,9 @@ logger = logging.getLogger(__name__)
 # klasifikasi gambar makanan / objek umum yang ringan.
 HF_MODEL_URL = "https://api-inference.huggingface.co/models/nateraw/food"
 
-# Model Object Detection/Classification untuk Obat/Insulin (Placeholder)
-# Pada produksi, gunakan model fine-tuned YOLOv8 khusus Insulin Pen
-HF_MEDICINE_MODEL_URL = "https://api-inference.huggingface.co/models/microsoft/resnet-50"
-
+# Model Zero-Shot Image Classification untuk Obat/Insulin
+# Sangat fleksibel, kita bisa mendeteksi tanpa perlu melatih dataset.
+HF_MEDICINE_MODEL_URL = "https://api-inference.huggingface.co/models/openai/clip-vit-base-patch32"
 
 class AIService:
     """Service untuk berinteraksi dengan model Kecerdasan Buatan (AI)."""
@@ -134,10 +133,18 @@ class AIService:
                 base_delay = 2.0
 
                 for attempt in range(max_retries):
+                    # Zero-Shot Image Classification butuh payload JSON berisi base64 image dan candidate_labels
+                    import base64
+                    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+                    payload = {
+                        "inputs": image_b64,
+                        "parameters": {"candidate_labels": ["insulin pen", "medicine bottle", "syringe", "pill"]}
+                    }
+
                     response = await client.post(
                         HF_MEDICINE_MODEL_URL,
                         headers=self.headers,
-                        content=image_bytes,
+                        json=payload,
                     )
 
                     if response.status_code == 503:
@@ -158,11 +165,11 @@ class AIService:
 
                 data = response.json()
 
-                # Parse response. Untuk ResNet/Klasifikasi biasanya array of dicts.
+                # Parse response. Untuk CLIP Zero-Shot, response berupa list of dicts:
+                # [{"score": 0.9, "label": "insulin pen"}, {"score": 0.05, "label": "syringe"}, ...]
                 if isinstance(data, list) and len(data) > 0:
                     top_result = data[0]
                     if isinstance(top_result, dict) and top_result.get("score", 0) > 0.1:
-                        # Di sistem produksi, label akan berupa "Lantus" atau "NovoRapid"
                         return top_result.get("label", "Unknown Medicine")
 
                 return "Unknown Medicine"

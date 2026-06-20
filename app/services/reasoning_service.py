@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Any, Dict, List
 
 
 class ReasoningService:
@@ -17,7 +17,7 @@ class ReasoningService:
             "unknown_food": {"calories": 100, "carbs": 15},  # Default fallback
         }
 
-    def estimate_nutrition(self, food_items: List[str]) -> Dict[str, float]:
+    def estimate_nutrition(self, food_items: List[str]) -> Dict[str, Any]:
         """
         Menghitung estimasi total kalori dan karbohidrat dari daftar makanan.
 
