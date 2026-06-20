@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from app.core.supabase import get_supabase_client
 from app.models.database import FoodLogCreate, MealType
 from app.services.ai_service import AIService
+from app.services.gamification_service import GamificationService
 from app.services.reasoning_service import ReasoningService
 from app.services.storage_service import StorageService
 
@@ -17,6 +18,7 @@ router = APIRouter(prefix="/scan", tags=["scan"])
 storage_service = StorageService()
 ai_service = AIService()
 reasoning_service = ReasoningService()
+gamification_service = GamificationService()
 
 
 @router.post("/food")
@@ -87,7 +89,12 @@ async def scan_food(
             detail=f"Gagal menyimpan data makanan ke database: {str(e)}",
         )
 
-    # 5. Return Response
+    # 5. Gamification: Update status Virtual Pet berdasarkan makanan
+    pet_status_update = gamification_service.evaluate_food_compliance(
+        child_id=child_id, total_calories=total_calories
+    )
+
+    # 6. Return Response
     return {
         "status": "success",
         "message": "Makanan berhasil dideteksi dan dicatat",
@@ -96,6 +103,7 @@ async def scan_food(
             "total_calories": total_calories,
             "total_carbs": nutrition_data["total_carbs"],
             "photo_url": public_url,
+            "pet_status_update": pet_status_update,
             "database_record": result.data[0] if result.data else None,
         },
     }
@@ -172,6 +180,9 @@ async def scan_medicine(
             detail=f"Gagal menyimpan data obat ke database: {str(e)}",
         )
 
+    # Gamification: Update status Virtual Pet berdasarkan obat
+    pet_status_update = gamification_service.evaluate_medicine_compliance(child_id=child_id)
+
     return {
         "status": "success",
         "message": "Obat berhasil dideteksi dan dicatat",
@@ -179,6 +190,7 @@ async def scan_medicine(
             "medication_detected": detected_medicine,
             "dosage_recorded": f"{dosage} {dosage_unit}",
             "photo_url": public_url,
+            "pet_status_update": pet_status_update,
             "database_record": result.data[0] if result.data else None,
         },
     }

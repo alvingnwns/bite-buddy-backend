@@ -101,7 +101,7 @@
   - [x] Validasi: dosage WAJIB diisi manual oleh parent (medical safety)
   - [x] Simpan ke tabel `medication_logs`
   - [x] Return response dengan detail obat yang terdeteksi
-- [ ] ⚠️ Buat bucket `medicine-photos` di Supabase Storage (manual)
+- [x] ⚠️ Buat bucket `medicine-photos` di Supabase Storage (manual)
 - [x] 📝 Handout: `md/handout_fitur_scan_medicine.md`
 
 ---
@@ -111,21 +111,21 @@
 > Referensi: design.md § "Gamification Logic" & Task #3
 
 ### Fase 3.1 — Gamification Service
-- [ ] `app/services/gamification_service.py`
-  - [ ] Fungsi `evaluate_compliance(child_id, food_log_data)`:
+- [x] `app/services/gamification_service.py`
+  - [x] Fungsi `evaluate_compliance(child_id, food_log_data)`:
     - Ambil `clinical_parameters` anak dari database
     - Bandingkan kalori/karbo makanan vs target medis
     - Hitung EXP reward atau penalty
-  - [ ] Fungsi `update_pet_status(child_id, exp_delta, happiness_delta, hunger_delta)`:
+  - [x] Fungsi `update_pet_status(child_id, exp_delta, happiness_delta, hunger_delta)`:
     - Update tabel `virtual_pets`
     - Hitung level up jika EXP cukup
     - Re-compute `current_status` via `compute_pet_status()`
-  - [ ] Fungsi `get_pet_evolution_state(level)` → visual state pet berdasarkan level
-- [ ] 📝 Handout: `md/handout_fitur_gamification.md`
+  - [x] Fungsi `get_pet_evolution_state(level)` → visual state pet berdasarkan level
+- [x] 📝 Handout: `md/handout_fitur_gamification.md`
 
 ### Fase 3.2 — Integrasi Gamification ke Scan Endpoints
-- [ ] `POST /api/v1/scan/food` — panggil gamification setelah food log tersimpan
-- [ ] `POST /api/v1/scan/medicine` — panggil gamification setelah medication log tersimpan
+- [x] `POST /api/v1/scan/food` — panggil gamification setelah food log tersimpan
+- [x] `POST /api/v1/scan/medicine` — panggil gamification setelah medication log tersimpan
 
 ---
 
@@ -264,7 +264,7 @@
 | 0.4 | Environment & Tooling | ✅ Selesai |
 | 1 | Scan Food Endpoint | ✅ Selesai |
 | 2 | Scan Medicine Endpoint | ✅ Selesai |
-| 3 | Gamification Service | ❌ Belum dimulai |
+| 3 | Gamification Service | ✅ Selesai |
 | 4 | Compliance Worker | ❌ Belum dimulai |
 | 5 | Real-time Sync | ❌ Belum dimulai |
 | 6 | CRUD Endpoints | ❌ Belum dimulai |
