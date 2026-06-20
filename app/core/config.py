@@ -17,10 +17,12 @@ class Settings(BaseSettings):
     debug: bool = False
     cors_origins: str = "http://localhost:3000,http://localhost:8081"
 
+    # ── Supabase ──────────────────────────────
     supabase_url: str = ""
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""
 
+    # ── Hugging Face ──────────────────────────
     hf_api_token: str = ""
 
     @property
