@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from postgrest import CountMethod
 
-from app.core.supabase import supabase
+from app.core.supabase import get_supabase_client
 from app.models.health import HealthResponse, build_health_response
 
 router = APIRouter(tags=["health"])
@@ -17,8 +17,9 @@ async def health_check() -> HealthResponse:
 async def database_check() -> dict:
     """Cek koneksi ke Supabase database."""
     try:
+        client = get_supabase_client()          # ← dibuat saat endpoint dipanggil
         result = (
-            supabase.table("users")
+            client.table("users")
             .select("count", count=CountMethod.exact)
             .limit(1)
             .execute()
