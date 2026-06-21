@@ -203,11 +203,6 @@ class VirtualPetBase(BaseModel):
     hunger: int = Field(default=100, ge=0, le=100)
     is_active: bool = True
 
-    @property
-    def current_status(self) -> PetStatus:
-        """Health status computed from current happiness + hunger values."""
-        return compute_pet_status(self.happiness, self.hunger)
-
 
 class VirtualPetCreate(VirtualPetBase):
     pass
