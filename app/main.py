@@ -8,9 +8,15 @@ from app.api.v1.router import api_v1_router
 from app.core.config import settings
 
 
+from app.workers.scheduler import start_scheduler, stop_scheduler
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # Startup: Start Background Worker
+    start_scheduler()
     yield
+    # Shutdown: Stop Background Worker
+    stop_scheduler()
 
 
 def create_app() -> FastAPI:

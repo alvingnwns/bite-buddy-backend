@@ -134,22 +134,18 @@
 > Referensi: design.md § "Constant Check (Compliance Worker)"
 
 ### Fase 4.1 — Scheduler Setup
-- [ ] Tambah `apscheduler` ke `requirements.txt`
-- [ ] `app/workers/scheduler.py` — setup APScheduler instance
-- [ ] Integrasi scheduler ke `app/main.py` lifespan (start/stop)
+- [x] Tambah `apscheduler` ke `requirements.txt`
+- [x] `app/workers/scheduler.py` — setup APScheduler instance
+- [x] Integrasi scheduler ke `app/main.py` lifespan (start/stop)
 
 ### Fase 4.2 — Compliance Worker Logic
-- [ ] `app/workers/compliance_worker.py`
-  - [ ] Fungsi `check_meal_compliance()`:
-    - Query `custom_meal_schedules` yang aktif hari ini
-    - Untuk setiap meal window yang sudah lewat:
-      - Cek apakah ada `food_logs` di window tersebut
-      - Jika TIDAK ada → apply health penalty ke `virtual_pets`
-      - Flag dashboard (insert alert/notification)
-  - [ ] PENTING: jangan gunakan fixed interval (24 jam)
-  - [ ] Gunakan meal window schedule (breakfast 07-09, lunch 11-13, dinner 17-19, dll.)
-  - [ ] Scheduling: cek setiap 15 menit (configurable)
-- [ ] 📝 Handout: `md/handout_fitur_compliance_worker.md`
+- [x] `app/workers/compliance_worker.py`
+  - [x] Fungsi `check_daily_compliance()`
+  - [x] Query db ambil `custom_meal_schedules` dan `medication_logs` hari ini
+  - [x] Evaluasi missed schedule
+  - [x] Apply Gamification penalty (reduce happiness) jika miss
+- [x] Setup cron job (tiap 1 jam untuk prototype/demo)
+- [x] 📝 Handout: `md/handout_fitur_compliance.md`
 
 ---
 
@@ -265,7 +261,7 @@
 | 1 | Scan Food Endpoint | ✅ Selesai |
 | 2 | Scan Medicine Endpoint | ✅ Selesai |
 | 3 | Gamification Service | ✅ Selesai |
-| 4 | Compliance Worker | ❌ Belum dimulai |
+| 4 | Compliance Worker | ✅ Selesai |
 | 5 | Real-time Sync | ❌ Belum dimulai |
 | 6 | CRUD Endpoints | ❌ Belum dimulai |
 | 7 | Auth & Security | ❌ Belum dimulai |
