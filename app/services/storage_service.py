@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import HTTPException, status
 from supabase import Client
 
-from app.core.supabase import get_supabase_client
+from app.core.supabase import get_supabase_service_client
 
 # Konstanta Validasi
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
@@ -17,7 +17,7 @@ class StorageService:
 
     def __init__(self) -> None:
         # Menggunakan lazy client dari Fase 0
-        self.supabase: Client = get_supabase_client()
+        self.supabase: Client = get_supabase_service_client()
 
     def _validate_file(self, filename: str, file_size: int) -> None:
         """Validasi ekstensi dan ukuran file."""

@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
-from app.core.supabase import get_supabase_client
+from app.core.supabase import get_supabase_service_client
 from app.models.database import FoodLogCreate, MealType
 from app.services.ai_service import AIService
 from app.services.gamification_service import GamificationService
@@ -77,7 +77,7 @@ async def scan_food(
         consumed_at=datetime.now(timezone.utc),
     )
 
-    client = get_supabase_client()
+    client = get_supabase_service_client()
     try:
         # Lakukan proses sinkronous ke database. 
         # Untuk optimisasi ekstrem, bisa dibuat async dengan supabase-js wrapper,
@@ -164,7 +164,7 @@ async def scan_medicine(
         notes=notes,
     )
 
-    client = get_supabase_client()
+    client = get_supabase_service_client()
     try:
         # Menyisipkan catatan obat, tapi di skema tabel kita tidak ada photo_url di medication_logs
         # Jika butuh menyimpan foto, kita bisa simpan public_url di 'notes' untuk sementara

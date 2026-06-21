@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timezone
 
-from app.core.supabase import get_supabase_client
+from app.core.supabase import get_supabase_service_client
 from app.services.gamification_service import GamificationService
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ def check_daily_compliance() -> None:
     """
     logger.info("[Compliance Worker] Memulai pengecekan kepatuhan medis...")
     
-    client = get_supabase_client()
+    client = get_supabase_service_client()
     gamification = GamificationService()
     
     try:

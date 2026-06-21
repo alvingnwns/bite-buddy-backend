@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 
-from app.core.supabase import get_supabase_client
+from app.core.supabase import get_supabase_service_client
 from app.models.database import compute_pet_status
 
 
@@ -57,7 +57,7 @@ class GamificationService:
         Memperbarui status Virtual Pet di database, menerapkan batasan 0-100, 
         serta menghitung Level Up (100 EXP = 1 Level).
         """
-        client = get_supabase_client()
+        client = get_supabase_service_client()
         
         # 1. Ambil data Virtual Pet saat ini
         try:
