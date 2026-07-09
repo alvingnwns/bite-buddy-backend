@@ -5,6 +5,7 @@ from fastapi import HTTPException, status
 
 from app.core.supabase import get_supabase_service_client
 from app.models.database import compute_pet_status
+from app.services.alert_service import create_alert
 
 
 class GamificationService:
@@ -46,6 +47,11 @@ class GamificationService:
             exp_delta = 0
             happiness_delta = -20
             hunger_delta = 20
+            create_alert(
+                child_id,
+                "food_warning",
+                "Waduh, makanan ini kurang sehat! Peliharaanmu jadi sedih dan sakit."
+            )
         elif total_calories <= (target_calories_per_meal * 1.15):
             # Makanan sehat & kalori sesuai batas
             exp_delta = 15
@@ -110,6 +116,12 @@ class GamificationService:
             current_level += levels_gained
             new_exp = new_exp % 100
             level_up = True
+            
+            create_alert(
+                child_id,
+                "level_up",
+                f"Hore! Peliharaanmu naik ke level {current_level}!"
+            )
 
         new_happiness = max(0, min(100, current_happiness + happiness_delta))
         new_hunger = max(0, min(100, current_hunger + hunger_delta))

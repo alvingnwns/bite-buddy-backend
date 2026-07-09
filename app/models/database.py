@@ -309,3 +309,29 @@ class MedicationLog(MedicationLogBase):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ──────────────────────────────────────────────
+# 7. Alerts (Real-time Sync)
+# ──────────────────────────────────────────────
+
+class AlertBase(BaseModel):
+    child_id: UUID
+    type: str = Field(..., max_length=50)
+    message: str
+    is_read: bool = False
+
+
+class AlertCreate(AlertBase):
+    pass
+
+
+class AlertUpdate(BaseModel):
+    is_read: Optional[bool] = None
+
+
+class AlertRead(AlertBase):
+    id: UUID
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
