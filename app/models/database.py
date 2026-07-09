@@ -99,6 +99,8 @@ class ClinicalParameterBase(BaseModel):
     head_circumference_cm: Optional[float] = Field(None, ge=20, le=80)
     allergies: list[str] = Field(default_factory=list)
     medical_conditions: list[str] = Field(default_factory=list)
+    target_daily_calories: Optional[int] = None
+    target_daily_carbs: Optional[float] = None
     notes: Optional[str] = None
 
 
@@ -112,6 +114,8 @@ class ClinicalParameterUpdate(BaseModel):
     head_circumference_cm: Optional[float] = None
     allergies: Optional[list[str]] = None
     medical_conditions: Optional[list[str]] = None
+    target_daily_calories: Optional[int] = None
+    target_daily_carbs: Optional[float] = None
     notes: Optional[str] = None
 
 
@@ -140,6 +144,8 @@ class CustomMealScheduleBase(BaseModel):
     is_active: bool = True
     start_date: date = Field(default_factory=date.today)
     end_date: Optional[date] = None
+    start_time: Optional[time] = None
+    end_time: Optional[time] = None
 
 
 class CustomMealScheduleCreate(CustomMealScheduleBase):
@@ -155,6 +161,8 @@ class CustomMealScheduleUpdate(BaseModel):
     portion_size: Optional[str] = None
     is_active: Optional[bool] = None
     end_date: Optional[date] = None
+    start_time: Optional[time] = None
+    end_time: Optional[time] = None
 
 
 class CustomMealSchedule(CustomMealScheduleBase):

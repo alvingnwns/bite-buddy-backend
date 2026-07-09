@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional, cast
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -16,17 +16,33 @@ class GamificationService:
     def __init__(self) -> None:
         pass
 
-    def evaluate_food_compliance(self, child_id: UUID, total_calories: float) -> Dict[str, int]:
+    def evaluate_food_compliance(self, child_id: UUID, total_calories: float) -> Dict[str, Any]:
         """
         Mengevaluasi nutrisi makanan dan menghitung reward/penalty untuk Virtual Pet.
-        
-        Rule Engine (Prototipe):
-        - Kalori <= 500 (Diasumsikan makanan sehat/terkontrol): +10 EXP, +10 Happiness, +20 Hunger
-        - Kalori > 500 (Junk food/Over kalori): +5 EXP, -10 Happiness, +20 Hunger
-        
-        (Pada produksi, ini akan merujuk ke ClinicalParameter milik child_id).
+        Mengambil target harian dari tabel clinical_parameters.
         """
-        if total_calories <= 500:
+        client = get_supabase_service_client()
+        target_calories_per_meal = 500  # Fallback
+        
+        try:
+            # Mengambil parameter klinis terbaru untuk anak ini
+            cp_response = client.table("clinical_parameters") \
+                .select("target_daily_calories") \
+                .eq("child_id", str(child_id)) \
+                .order("created_at", desc=True) \
+                .limit(1) \
+                .execute()
+                
+            if cp_response.data and cp_response.data[0].get("target_daily_calories"):
+                # Asumsi 3 kali makan besar sehari
+                target_daily = cp_response.data[0]["target_daily_calories"]
+                target_calories_per_meal = target_daily / 3
+        except Exception:
+            pass # Abaikan error, gunakan nilai fallback 500 kalori
+
+        # Rule Engine
+        # Kita beri toleransi 15% dari target per meal
+        if total_calories <= (target_calories_per_meal * 1.15):
             exp_delta = 10
             happiness_delta = 10
             hunger_delta = 20
@@ -37,12 +53,9 @@ class GamificationService:
 
         return self.update_pet_status(child_id, exp_delta, happiness_delta, hunger_delta)
 
-    def evaluate_medicine_compliance(self, child_id: UUID) -> Dict[str, int]:
+    def evaluate_medicine_compliance(self, child_id: UUID) -> Dict[str, Any]:
         """
         Mengevaluasi kepatuhan minum/suntik obat.
-        
-        Rule Engine:
-        - Suntik Insulin / Minum Obat: +20 EXP, +15 Happiness
         """
         exp_delta = 20
         happiness_delta = 15
@@ -59,11 +72,9 @@ class GamificationService:
         """
         client = get_supabase_service_client()
         
-        # 1. Ambil data Virtual Pet saat ini
         try:
             response = client.table("virtual_pets").select("*").eq("child_id", str(child_id)).execute()
             if not response.data:
-                # Jika anak belum punya pet, kembalikan delta default sebagai info log
                 return {
                     "exp_gained": 0,
                     "level_up": False,
@@ -73,7 +84,6 @@ class GamificationService:
                     "current_status": "neutral"
                 }
             
-            from typing import Any, cast
             pet = cast(Dict[str, Any], response.data[0])
         except Exception as e:
             raise HTTPException(
@@ -81,7 +91,6 @@ class GamificationService:
                 detail=f"Gagal mengambil data Virtual Pet: {str(e)}",
             )
 
-        # 2. Kalkulasi nilai baru
         current_exp = pet["experience_points"]
         current_level = pet["level"]
         current_happiness = pet["happiness"]
@@ -89,22 +98,18 @@ class GamificationService:
 
         new_exp = current_exp + exp_delta
         
-        # Cek Level Up (Setiap kelipatan 100 EXP = Level Naik)
         level_up = False
         if new_exp >= 100:
             levels_gained = new_exp // 100
             current_level += levels_gained
-            new_exp = new_exp % 100  # Sisa EXP setelah naik level
+            new_exp = new_exp % 100
             level_up = True
 
-        # Terapkan batasan Min/Max (0-100) untuk Happiness dan Hunger
         new_happiness = max(0, min(100, current_happiness + happiness_delta))
         new_hunger = max(0, min(100, current_hunger + hunger_delta))
 
-        # Re-compute status keseluruhan (happy, sad, sick, dsb)
         new_status = compute_pet_status(new_happiness, new_hunger).value
 
-        # 3. Update ke Database
         update_data = {
             "experience_points": new_exp,
             "level": current_level,

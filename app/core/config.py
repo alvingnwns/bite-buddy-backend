@@ -22,8 +22,9 @@ class Settings(BaseSettings):
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""
 
-    # ── Hugging Face ──────────────────────────
+    # ── Hugging Face & AI ─────────────────────
     hf_api_token: str = ""
+    use_local_ai: bool = False
 
     @property
     def cors_origins_list(self) -> list[str]:
