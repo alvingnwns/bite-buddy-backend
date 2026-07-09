@@ -16,10 +16,11 @@ class GamificationService:
     def __init__(self) -> None:
         pass
 
-    def evaluate_food_compliance(self, child_id: UUID, total_calories: float) -> Dict[str, Any]:
+    def evaluate_food_compliance(self, child_id: UUID, total_calories: float, is_healthy: bool = True) -> Dict[str, Any]:
         """
         Mengevaluasi nutrisi makanan dan menghitung reward/penalty untuk Virtual Pet.
         Mengambil target harian dari tabel clinical_parameters.
+        Jika is_healthy=False, maka pet akan mendapat penalty besar.
         """
         client = get_supabase_service_client()
         target_calories_per_meal = 500  # Fallback
@@ -40,15 +41,20 @@ class GamificationService:
         except Exception:
             pass # Abaikan error, gunakan nilai fallback 500 kalori
 
-        # Rule Engine
-        # Kita beri toleransi 15% dari target per meal
-        if total_calories <= (target_calories_per_meal * 1.15):
-            exp_delta = 10
-            happiness_delta = 10
+        # Rule Engine (Healthy vs Junk Food)
+        if not is_healthy:
+            exp_delta = 0
+            happiness_delta = -20
             hunger_delta = 20
+        elif total_calories <= (target_calories_per_meal * 1.15):
+            # Makanan sehat & kalori sesuai batas
+            exp_delta = 15
+            happiness_delta = 15
+            hunger_delta = 30
         else:
+            # Makanan sehat tapi kalori berlebih
             exp_delta = 5
-            happiness_delta = -10
+            happiness_delta = -5
             hunger_delta = 20
 
         return self.update_pet_status(child_id, exp_delta, happiness_delta, hunger_delta)

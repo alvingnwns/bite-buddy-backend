@@ -27,6 +27,7 @@ class LogService:
     ) -> Dict[str, Any]:
         food_name_str = ", ".join(nutrition_data["foods_detected"])
         total_calories = int(nutrition_data["total_calories"])
+        is_healthy = nutrition_data.get("is_healthy", True)
 
         log_data = FoodLogCreate(
             child_id=child_id,
@@ -35,6 +36,7 @@ class LogService:
             food_name=food_name_str,
             calories=total_calories,
             photo_url=public_url,
+            is_healthy=is_healthy,
             notes=notes,
             consumed_at=datetime.now(timezone.utc),
         )

@@ -71,8 +71,9 @@ async def scan_food(
 
     # Gamification
     total_calories = int(nutrition_data["total_calories"])
+    is_healthy = nutrition_data.get("is_healthy", True)
     pet_status_update = gamification_service.evaluate_food_compliance(
-        child_id=child_id, total_calories=total_calories
+        child_id=child_id, total_calories=total_calories, is_healthy=is_healthy
     )
 
     return {
@@ -82,6 +83,7 @@ async def scan_food(
             "foods_detected": nutrition_data["foods_detected"],
             "total_calories": total_calories,
             "total_carbs": nutrition_data["total_carbs"],
+            "is_healthy": nutrition_data.get("is_healthy", True),
             "photo_url": public_url,
             "pet_status_update": pet_status_update,
             "database_record": db_record,

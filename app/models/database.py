@@ -247,6 +247,7 @@ class FoodLogBase(BaseModel):
     portion_size: Optional[str] = None
     calories: Optional[int] = None
     photo_url: Optional[str] = None
+    is_healthy: bool = True
     notes: Optional[str] = None
     consumed_at: datetime = Field(default_factory=datetime.utcnow)
 

@@ -1,5 +1,3 @@
-
-
 # Editor
 .vscode/
 .agents/rules
@@ -13,3 +11,6 @@ venv/
 bbb_venv/
 bbb-venv/
 .env
+
+# Others
+scratch/
