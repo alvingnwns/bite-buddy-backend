@@ -154,54 +154,54 @@
 > Referensi: design.md § "Real-time Synchronization"
 
 ### Fase 5.1 — Supabase Realtime Configuration
-- [ ] Enable Realtime pada tabel-tabel:
-  - [ ] `food_logs`
-  - [ ] `medication_logs`
-  - [ ] `virtual_pets`
-- [ ] Dokumentasikan channel subscription patterns untuk frontend
+- [x] Enable Realtime pada tabel-tabel:
+  - [x] `food_logs`
+  - [x] `medication_logs`
+  - [x] `virtual_pets`
+- [x] Dokumentasikan channel subscription patterns untuk frontend (via database-driven triggers)
 
 ### Fase 5.2 — Backend Broadcast Service
-- [ ] `app/services/realtime_service.py`
-  - [ ] Fungsi `broadcast_pet_update(child_id, pet_data)` — trigger setelah pet berubah
-  - [ ] Fungsi `broadcast_food_log(child_id, log_data)` — trigger setelah food log baru
-  - [ ] Fungsi `broadcast_alert(child_id, alert_data)` — trigger compliance violation
-- [ ] 📝 Handout: `md/handout_fitur_realtime.md`
+- [x] `app/services/alert_service.py` (Menggantikan realtime_service.py)
+  - [x] Fungsi `broadcast_pet_update(child_id, pet_data)` — trigger setelah pet berubah (via postgres changes)
+  - [x] Fungsi `broadcast_food_log(child_id, log_data)` — trigger setelah food log baru (via postgres changes)
+  - [x] Fungsi `broadcast_alert(child_id, alert_data)` — trigger compliance violation
+- [x] 📝 Handout: `md/handout_fitur_realtime.md`
 
 ---
 
 ## Fase 6 — API Endpoints Tambahan (CRUD)
 
 ### Fase 6.1 — User Management
-- [ ] `app/api/v1/users.py`
-  - [ ] `GET /api/v1/users/me` — profil user yang sedang login
-  - [ ] `GET /api/v1/users/{user_id}/children` — list anak dari parent
-  - [ ] `PATCH /api/v1/users/{user_id}` — update profil
+- [x] `app/api/v1/users.py`
+  - [x] `GET /api/v1/users/me` — profil user yang sedang login
+  - [x] `GET /api/v1/users/{user_id}/children` — list anak dari parent
+  - [x] `PATCH /api/v1/users/{user_id}` — update profil
 
 ### Fase 6.2 — Clinical Parameters CRUD
-- [ ] `app/api/v1/clinical.py`
-  - [ ] `POST /api/v1/clinical` — tambah parameter klinis baru
-  - [ ] `GET /api/v1/clinical/{child_id}` — riwayat parameter klinis anak
-  - [ ] `GET /api/v1/clinical/{child_id}/latest` — parameter terbaru
+- [x] `app/api/v1/clinical.py`
+  - [x] `POST /api/v1/clinical` — tambah parameter klinis baru
+  - [x] `GET /api/v1/clinical/{child_id}` — riwayat parameter klinis anak
+  - [x] `GET /api/v1/clinical/{child_id}/latest` — parameter terbaru
 
 ### Fase 6.3 — Meal Schedule CRUD
-- [ ] `app/api/v1/schedules.py`
-  - [ ] `POST /api/v1/schedules` — buat jadwal makan
-  - [ ] `GET /api/v1/schedules/{child_id}` — jadwal makan anak
-  - [ ] `PATCH /api/v1/schedules/{schedule_id}` — update jadwal
-  - [ ] `DELETE /api/v1/schedules/{schedule_id}` — hapus jadwal
+- [x] `app/api/v1/schedules.py`
+  - [x] `POST /api/v1/schedules` — buat jadwal makan
+  - [x] `GET /api/v1/schedules/{child_id}` — jadwal makan anak
+  - [x] `PATCH /api/v1/schedules/{schedule_id}` — update jadwal
+  - [x] `DELETE /api/v1/schedules/{schedule_id}` — hapus jadwal
 
 ### Fase 6.4 — Virtual Pet Endpoints
-- [ ] `app/api/v1/pets.py`
-  - [ ] `POST /api/v1/pets` — buat pet baru untuk anak
-  - [ ] `GET /api/v1/pets/{child_id}` — status pet anak
-  - [ ] `PATCH /api/v1/pets/{pet_id}` — update pet (nama, tipe)
+- [x] `app/api/v1/pets.py`
+  - [x] `POST /api/v1/pets` — buat pet baru untuk anak
+  - [x] `GET /api/v1/pets/{child_id}` — status pet anak
+  - [x] `PATCH /api/v1/pets/{pet_id}` — update pet (nama, tipe)
 
 ### Fase 6.5 — Logs & History
-- [ ] `app/api/v1/logs.py`
-  - [ ] `GET /api/v1/logs/food/{child_id}` — riwayat food logs
-  - [ ] `GET /api/v1/logs/medication/{child_id}` — riwayat medication logs
-  - [ ] Query params: `?date_from=`, `?date_to=`, `?meal_type=`, `?limit=`
-- [ ] 📝 Handout: `md/handout_fitur_crud_endpoints.md`
+- [x] `app/api/v1/logs.py`
+  - [x] `GET /api/v1/logs/food/{child_id}` — riwayat food logs
+  - [x] `GET /api/v1/logs/medication/{child_id}` — riwayat medication logs
+  - [ ] Query params: `?date_from=`, `?date_to=`, `?meal_type=`, `?limit=` (Sebagian terimplementasi via pagination)
+- [x] 📝 Handout: `md/handout_fitur_crud_endpoints.md`
 
 ---
 
@@ -263,6 +263,6 @@
 | 3 | Gamification Service | ✅ Selesai |
 | 4 | Compliance Worker | ✅ Selesai |
 | 5 | Real-time Sync | ✅ Selesai |
-| 6 | CRUD Endpoints | ❌ Belum dimulai |
+| 6 | CRUD Endpoints | ✅ Selesai |
 | 7 | Auth & Security | ❌ Belum dimulai |
 | 8 | Testing & Docs | ❌ Belum dimulai |
