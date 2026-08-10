@@ -4,7 +4,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Konfigurasi aplikasi yang dibaca dari environment variables."""
+    """Konfigurasi aplikasi yang dibaca dari environment variables.
+
+    Semua nilai dibaca dari file .env di root project.
+    Gunakan lru_cache via get_settings() agar tidak dibaca ulang setiap request.
+    """
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -22,9 +26,13 @@ class Settings(BaseSettings):
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""
 
-    # ── Hugging Face & AI ─────────────────────
-    hf_api_token: str = ""
-    use_local_ai: bool = False
+    # ── Gemini AI (Google AI Studio) ──────────
+    # Satu API key, beberapa model untuk task berbeda.
+    # Model default bisa diubah di .env tanpa ganti kode.
+    gemini_api_key: str = ""
+    gemini_food_model: str = "gemini-1.5-flash"       # Untuk deteksi makanan dari foto
+    gemini_medicine_model: str = "gemini-1.5-flash"   # Untuk deteksi obat/insulin dari foto
+    gemini_nutrition_model: str = "gemini-1.5-flash"  # Untuk estimasi kalori & makronutrien
 
     @property
     def cors_origins_list(self) -> list[str]:
