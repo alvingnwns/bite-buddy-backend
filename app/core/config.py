@@ -30,9 +30,9 @@ class Settings(BaseSettings):
     # Satu API key, beberapa model untuk task berbeda.
     # Model default bisa diubah di .env tanpa ganti kode.
     gemini_api_key: str = ""
-    gemini_food_model: str = "gemini-1.5-flash"       # Untuk deteksi makanan dari foto
-    gemini_medicine_model: str = "gemini-1.5-flash"   # Untuk deteksi obat/insulin dari foto
-    gemini_nutrition_model: str = "gemini-1.5-flash"  # Untuk estimasi kalori & makronutrien
+    gemini_food_model: str = "gemini-3.5-flash"       # Untuk deteksi makanan dari foto
+    gemini_medicine_model: str = "gemini-3.5-flash"   # Untuk deteksi obat/insulin dari foto
+    gemini_nutrition_model: str = "gemini-3.5-flash"  # Untuk estimasi kalori & makronutrien
 
     @property
     def cors_origins_list(self) -> list[str]:
