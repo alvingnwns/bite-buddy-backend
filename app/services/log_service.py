@@ -83,6 +83,7 @@ class LogService:
             final_notes = f"[Photo URL: {public_url}] {notes if notes else ''}".strip()
             db_log_data = log_data.model_dump(mode="json")
             db_log_data["notes"] = final_notes
+            db_log_data.pop("photo_url", None) # Remove before insert because table doesn't have it
 
             result = client.table("medication_logs").insert(db_log_data).execute()
             return result.data[0] if result.data else {}

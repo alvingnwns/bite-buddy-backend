@@ -41,12 +41,12 @@ def test_get_users_me(mock_supabase):
 
 def test_update_users_me(mock_supabase):
     mock_supabase.table().update().eq().execute.return_value = MagicMock(
-        data=[{"id": MOCK_USER_ID, "name": "Updated Name"}]
+        data=[{"id": MOCK_USER_ID, "full_name": "Updated Name"}]
     )
     
-    response = client.patch(f"/api/v1/users/{MOCK_USER_ID}", json={"name": "Updated Name"})
+    response = client.patch(f"/api/v1/users/{MOCK_USER_ID}", json={"full_name": "Updated Name"})
     assert response.status_code == 200
-    assert response.json()["name"] == "Updated Name"
+    assert response.json()["full_name"] == "Updated Name"
 
 def test_get_clinical_latest(mock_supabase):
     mock_supabase.table().select().eq().order().limit().execute.return_value = MagicMock(

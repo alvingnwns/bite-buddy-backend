@@ -79,7 +79,7 @@ def setup_e2e_data():
         client.table("virtual_pets").insert({
             "id": E2E_PET_ID,
             "child_id": E2E_CHILD_ID,
-            "pet_type": "dragon",
+            "pet_type": "dog",
             "pet_name": "E2E Pet",
             "level": 1,
             "experience_points": 50,

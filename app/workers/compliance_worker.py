@@ -5,6 +5,7 @@ from typing import Any, Dict, cast
 from app.core.supabase import get_supabase_service_client
 from app.services.gamification_service import GamificationService
 from app.services.alert_service import create_alert
+from app.models.database import AlertType
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ def check_daily_compliance() -> None:
                 logger.info(f"[Compliance Worker] Anak {child_id} belum minum obat hari ini! Penalty obat diterapkan.")
                 try:
                     gamification.update_pet_status(child_id=child_id, exp_delta=0, happiness_delta=-10, hunger_delta=0)
-                    create_alert(child_id, "compliance_violation", "Kamu belum minum obat hari ini! Peliharaanmu jadi sakit.")
+                    create_alert(child_id, AlertType.compliance_violation, "Kamu belum minum obat hari ini! Peliharaanmu jadi sakit.")
                 except Exception as e:
                     logger.error(f"Gagal memberi penalty obat untuk {child_id}: {str(e)}")
 
@@ -66,6 +67,10 @@ def check_daily_compliance() -> None:
                 .execute()
 
             for schedule in schedules_response.data:
+                # Cek deduplikasi penalty
+                if schedule.get("last_penalty_date") == today_date.isoformat():
+                    continue
+
                 # Cek apakah ada food_log untuk meal_type ini hari ini
                 food_logs_resp = client.table("food_logs").select("*") \
                     .eq("child_id", child_id) \
@@ -77,7 +82,12 @@ def check_daily_compliance() -> None:
                     logger.info(f"[Compliance Worker] Anak {child_id} melewatkan jadwal {schedule['meal_name']}! Penalty diterapkan.")
                     try:
                         gamification.update_pet_status(child_id=child_id, exp_delta=0, happiness_delta=-15, hunger_delta=30)
-                        create_alert(child_id, "compliance_violation", f"Kamu melewatkan jadwal makan '{schedule['meal_name']}'! Peliharaanmu jadi kelaparan.")
+                        create_alert(child_id, AlertType.compliance_violation, f"Kamu melewatkan jadwal makan '{schedule['meal_name']}'! Peliharaanmu jadi kelaparan.")
+                        
+                        # Update last_penalty_date agar tidak diulang hari ini
+                        client.table("custom_meal_schedules").update(
+                            {"last_penalty_date": today_date.isoformat()}
+                        ).eq("id", schedule["id"]).execute()
                     except Exception as e:
                         logger.error(f"Gagal memberi penalty makan untuk {child_id}: {str(e)}")
                 

@@ -40,3 +40,19 @@ def test_e2e_compliance_worker(setup_e2e_data):
     # Harus di bawah 100 karena kena penalty missed meal (-15) dan missed meds (-10)
     assert current_happiness < 100
     print(f"Happiness turun menjadi {current_happiness} karena penalti.")
+
+    # 5. Uji Deduplikasi: Jalankan Worker KEDUA KALINYA
+    check_daily_compliance()
+    
+    # 6. Verifikasi Deduplikasi
+    pets_after_second_run = client.table("virtual_pets").select("*").eq("id", pet_id).execute()
+    happiness_after = pets_after_second_run.data[0]["happiness"]
+    
+    # Missed meds penalty (-10) mungkin masih ter-trigger 
+    # karena belum ada kolom last_penalty_date khusus untuk meds di tabel users.
+    # Namun penalty meal (-15) TIDAK boleh ter-trigger lagi.
+    # Jika deduplikasi gagal, happiness akan turun 25 (10+15). 
+    # Jika berhasil, hanya turun maksimal 10.
+    diff = current_happiness - happiness_after
+    assert diff <= 10, f"Deduplikasi gagal! Happiness turun berlebih: {diff}"
+    print("Deduplikasi penalty jadwal makan berhasil diverifikasi.")

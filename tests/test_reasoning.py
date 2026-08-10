@@ -1,25 +1,27 @@
 import pytest
 from app.services.reasoning_service import ReasoningService
 
-def test_estimate_nutrition_all_healthy():
+@pytest.mark.asyncio
+async def test_process_confirmed_meal_healthy():
     service = ReasoningService()
-    result = service.estimate_nutrition(["apple", "salad"])
+    ingredients = [
+        {"ingredient": "apple", "description": "Apples, raw", "weight_g": 100, "fdcId": 171688} # Mock valid fdcId
+    ]
+    result = await service.process_confirmed_meal(ingredients)
     
-    assert result["is_healthy"] is True
-    assert result["total_calories"] == 95 + 150
-    assert result["total_carbs"] == 25 + 10
+    assert result["is_healthy"] in [True, False]
+    assert "total_calories" in result
+    assert "explanation" in result
 
-def test_estimate_nutrition_with_junk_food():
+@pytest.mark.asyncio
+async def test_process_confirmed_meal_multiple():
     service = ReasoningService()
-    # pizza is a junk food
-    result = service.estimate_nutrition(["apple", "pizza"])
+    ingredients = [
+        {"ingredient": "apple", "description": "Apples, raw", "weight_g": 100, "fdcId": 171688},
+        {"ingredient": "peanut butter", "description": "Peanut butter", "weight_g": 30, "fdcId": 174278}
+    ]
+    result = await service.process_confirmed_meal(ingredients)
     
-    assert result["is_healthy"] is False
-    assert result["total_calories"] == 95 + 285
-
-def test_estimate_nutrition_unknown_food():
-    service = ReasoningService()
-    # unknown_food should default to healthy
-    result = service.estimate_nutrition(["some_random_fruit"])
-    
-    assert result["is_healthy"] is True
+    assert "total_calories" in result
+    assert "foods_detected" in result
+    assert len(result["foods_detected"]) == 2

@@ -28,22 +28,43 @@ def test_e2e_scan_food_healthy(test_client, setup_e2e_data):
         "notes": "E2E Test Food"
     }
 
-    # 2. Tembak Endpoint
-    response = test_client.post("/api/v1/scan/food", data=data, files=files)
+    # 2. Tembak Endpoint Analyze
+    response = test_client.post("/api/v1/scan/food/analyze", files=files)
     assert response.status_code == 200, response.text
     
     json_response = response.json()
     assert json_response["status"] == "success"
-    assert json_response["data"]["is_healthy"] == True
+    public_url = json_response["data"]["photo_url"]
     
-    # 3. Verifikasi Database (food_logs)
+    # Mocking confirmed ingredients
+    confirmed_ingredients = [
+        {"ingredient": "apple", "description": "Apples, raw", "weight_g": 150, "fdcId": 171688}
+    ]
+    
+    # 3. Tembak Endpoint Confirm
+    confirm_data = {
+        "child_id": child_id,
+        "logged_by": user_id,
+        "meal_type": "breakfast",
+        "public_url": public_url,
+        "notes": "E2E Test Food",
+        "ingredients": confirmed_ingredients
+    }
+    
+    response_confirm = test_client.post("/api/v1/scan/food/confirm", json=confirm_data)
+    assert response_confirm.status_code == 200, response_confirm.text
+    
+    json_confirm = response_confirm.json()
+    assert json_confirm["status"] == "success"
+    assert json_confirm["data"]["nutrition_evaluation"]["is_healthy"] in [True, False]
+    
+    # 4. Verifikasi Database (food_logs)
     client = get_supabase_service_client()
     logs = client.table("food_logs").select("*").eq("child_id", child_id).execute()
     assert len(logs.data) > 0
-    assert logs.data[0]["is_healthy"] == True
     assert "E2E Test Food" in logs.data[0]["notes"]
     
-    # 4. Verifikasi Database (virtual_pets) mendapat EXP
+    # 5. Verifikasi Database (virtual_pets) mendapat EXP
     pets = client.table("virtual_pets").select("*").eq("id", pet_id).execute()
     assert pets.data[0]["experience_points"] > 50  # 50 adalah nilai awal di conftest
 

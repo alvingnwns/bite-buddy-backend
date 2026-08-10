@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""
+    supabase_jwt_secret: str = ""
 
     # ── Gemini AI (Google AI Studio) ──────────
     # Satu API key, beberapa model untuk task berbeda.
