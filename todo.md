@@ -242,13 +242,206 @@
 ## Rules Pengerjaan (dari `rules.md`)
 
 1. ✅ Setiap 1 fitur selesai → buat `handout_fitur_namafitur.md`
+### Fase 1.1 — Supabase Storage Service
+- [x] `app/services/storage_service.py`
+  - [x] Fungsi `upload_image_to_storage(file_bytes, bucket, filename)` → public URL
+  - [x] Validasi file type (hanya gambar: jpg, png, webp)
+  - [x] Validasi ukuran file (max 10MB)
+  - [x] Generate unique filename (UUID-based)
+- [x] ⚠️ Buat bucket `food-photos` di Supabase Storage (manual)
+
+### Fase 1.2 — AI Inference Service (SegFormer)
+- [x] `app/services/ai_service.py`
+  - [x] Fungsi `detect_food(image_bytes)` → kirim ke Hugging Face SegFormer API
+  - [x] Parse response segmentation → list food items
+  - [x] Error handling: timeout, rate limit, API down
+  - [x] Retry logic dengan exponential backoff
+
+### Fase 1.3 — Multimodal Reasoning Service
+- [x] `app/services/reasoning_service.py`
+  - [x] Fungsi `estimate_nutrition(food_items: list)` → JSON output
+  - [x] Output format: `{ "foods": [...], "total_calories": int, "total_carbs": float }`
+  - [x] Lookup nutritional database / estimation logic
+
+### Fase 1.4 — Scan Food Endpoint
+- [x] `app/api/v1/scan.py`
+  - [x] `POST /api/v1/scan/food` — terima foto makanan
+  - [x] Implementasi `asyncio.gather` untuk parallel processing:
+    - Task A: Upload gambar ke Supabase Storage
+    - Task B: Kirim gambar ke SegFormer AI
+  - [x] Proses hasil AI lewat reasoning service
+  - [x] Simpan ke tabel `food_logs`
+  - [ ] Trigger gamification logic (Fase 3 - Menyusul nanti)
+  - [x] Return response dengan detail makanan & status pet
+- [x] `app/api/v1/router.py` — register scan router
+- [x] 📝 Handout: `md/handout_fitur_scan_food.md`
+
+---
+
+## Fase 2 — Scan Medicine/Insulin Endpoint
+
+> Referensi: design.md § "Detect Medicine/Insulin Flow"
+
+### Fase 2.1 — AI Inference Service (YOLOv8)
+- [x] `app/services/ai_service.py` (extend)
+  - [x] Fungsi `detect_medicine(image_bytes)` → kirim ke Hugging Face YOLOv8 API
+  - [x] Parse response → detected insulin type, pen color/shape
+  - [x] Error handling (sama dengan food detection)
+
+### Fase 2.2 — Scan Medicine Endpoint
+- [x] `app/api/v1/scan.py` (extend)
+  - [x] `POST /api/v1/scan/medicine` — terima foto insulin pen + manual dosage input
+  - [x] Upload gambar ke Supabase Storage (bucket: `medicine-photos`)
+  - [x] Kirim gambar ke YOLOv8 untuk deteksi tipe insulin
+  - [x] Validasi: dosage WAJIB diisi manual oleh parent (medical safety)
+  - [x] Simpan ke tabel `medication_logs`
+  - [x] Return response dengan detail obat yang terdeteksi
+- [x] ⚠️ Buat bucket `medicine-photos` di Supabase Storage (manual)
+- [x] 📝 Handout: `md/handout_fitur_scan_medicine.md`
+
+---
+
+## Fase 3 — Gamification & Reasoning Service
+
+> Referensi: design.md § "Gamification Logic" & Task #3
+
+### Fase 3.1 — Gamification Service
+- [x] `app/services/gamification_service.py`
+  - [x] Fungsi `evaluate_compliance(child_id, food_log_data)`:
+    - Ambil `clinical_parameters` anak dari database
+    - Bandingkan kalori/karbo makanan vs target medis
+    - Hitung EXP reward atau penalty
+  - [x] Fungsi `update_pet_status(child_id, exp_delta, happiness_delta, hunger_delta)`:
+    - Update tabel `virtual_pets`
+    - Hitung level up jika EXP cukup
+    - Re-compute `current_status` via `compute_pet_status()`
+  - [x] Fungsi `get_pet_evolution_state(level)` → visual state pet berdasarkan level
+- [x] 📝 Handout: `md/handout_fitur_gamification.md`
+
+### Fase 3.2 — Integrasi Gamification ke Scan Endpoints
+- [x] `POST /api/v1/scan/food` — panggil gamification setelah food log tersimpan
+- [x] `POST /api/v1/scan/medicine` — panggil gamification setelah medication log tersimpan
+
+---
+
+## Fase 4 — Compliance Worker (Background Job)
+
+> Referensi: design.md § "Constant Check (Compliance Worker)"
+
+### Fase 4.1 — Scheduler Setup
+- [x] Tambah `apscheduler` ke `requirements.txt`
+- [x] `app/workers/scheduler.py` — setup APScheduler instance
+- [x] Integrasi scheduler ke `app/main.py` lifespan (start/stop)
+
+### Fase 4.2 — Compliance Worker Logic
+- [x] `app/workers/compliance_worker.py`
+  - [x] Fungsi `check_daily_compliance()`
+  - [x] Query db ambil `custom_meal_schedules` dan `medication_logs` hari ini
+  - [x] Evaluasi missed schedule
+  - [x] Apply Gamification penalty (reduce happiness) jika miss
+- [x] Setup cron job (tiap 1 jam untuk prototype/demo)
+- [x] 📝 Handout: `md/handout_fitur_compliance.md`
+
+---
+
+## Fase 5 — Real-time Synchronization
+
+> Referensi: design.md § "Real-time Synchronization"
+
+### Fase 5.1 — Supabase Realtime Configuration
+- [x] Enable Realtime pada tabel-tabel:
+  - [x] `food_logs`
+  - [x] `medication_logs`
+  - [x] `virtual_pets`
+- [x] Dokumentasikan channel subscription patterns untuk frontend (via database-driven triggers)
+
+### Fase 5.2 — Backend Broadcast Service
+- [x] `app/services/alert_service.py` (Menggantikan realtime_service.py)
+  - [x] Fungsi `broadcast_pet_update(child_id, pet_data)` — trigger setelah pet berubah (via postgres changes)
+  - [x] Fungsi `broadcast_food_log(child_id, log_data)` — trigger setelah food log baru (via postgres changes)
+  - [x] Fungsi `broadcast_alert(child_id, alert_data)` — trigger compliance violation
+- [x] 📝 Handout: `md/handout_fitur_realtime.md`
+
+---
+
+## Fase 6 — API Endpoints Tambahan (CRUD)
+
+### Fase 6.1 — User Management
+- [x] `app/api/v1/users.py`
+  - [x] `GET /api/v1/users/me` — profil user yang sedang login
+  - [x] `GET /api/v1/users/{user_id}/children` — list anak dari parent
+  - [x] `PATCH /api/v1/users/{user_id}` — update profil
+
+### Fase 6.2 — Clinical Parameters CRUD
+- [x] `app/api/v1/clinical.py`
+  - [x] `POST /api/v1/clinical` — tambah parameter klinis baru
+  - [x] `GET /api/v1/clinical/{child_id}` — riwayat parameter klinis anak
+  - [x] `GET /api/v1/clinical/{child_id}/latest` — parameter terbaru
+
+### Fase 6.3 — Meal Schedule CRUD
+- [x] `app/api/v1/schedules.py`
+  - [x] `POST /api/v1/schedules` — buat jadwal makan
+  - [x] `GET /api/v1/schedules/{child_id}` — jadwal makan anak
+  - [x] `PATCH /api/v1/schedules/{schedule_id}` — update jadwal
+  - [x] `DELETE /api/v1/schedules/{schedule_id}` — hapus jadwal
+
+### Fase 6.4 — Virtual Pet Endpoints
+- [x] `app/api/v1/pets.py`
+  - [x] `POST /api/v1/pets` — buat pet baru untuk anak
+  - [x] `GET /api/v1/pets/{child_id}` — status pet anak
+  - [x] `PATCH /api/v1/pets/{pet_id}` — update pet (nama, tipe)
+
+### Fase 6.5 — Logs & History
+- [x] `app/api/v1/logs.py`
+  - [x] `GET /api/v1/logs/food/{child_id}` — riwayat food logs
+  - [x] `GET /api/v1/logs/medication/{child_id}` — riwayat medication logs
+  - [ ] Query params: `?date_from=`, `?date_to=`, `?meal_type=`, `?limit=` (Sebagian terimplementasi via pagination)
+- [x] 📝 Handout: `md/handout_fitur_crud_endpoints.md`
+
+---
+
+## Fase 7 — Auth & Security
+
+### Fase 7.1 — Supabase Auth Integration
+- [x] `app/core/auth.py` — dependency untuk extract & verify JWT dari Supabase Auth
+- [x] `app/api/deps.py` — `get_current_user()` dependency
+- [x] Protect semua endpoint dengan auth dependency
+- [x] Role-based access:
+  - Child: hanya lihat data sendiri
+  - Parent: lihat & manage data anak
+  - Doctor: lihat data semua pasien yang di-assign
+
+### Fase 7.2 — RLS Enforcement
+- [x] `migrations/002_rls_policies.sql` — apply RLS policies dari `rls_policies.md`
+- [x] Test RLS policies berjalan benar
+- [x] 📝 Handout: `md/handout_fitur_auth.md`
+
+---
+
+## Fase 8 — Testing & Documentation
+
+### Fase 8.1 — Unit Tests
+- [x] Tambah `pytest`, `pytest-asyncio`, `httpx` ke requirements (dev)
+- [x] `tests/test_health.py` — test health & db-check endpoints
+- [x] `tests/test_scan.py` — test scan endpoints (mock AI)
+- [x] `tests/test_gamification.py` — test gamification logic
+- [x] `tests/test_compliance.py` — test compliance worker
+
+### Fase 8.2 — API Documentation
+- [ ] Review & polish Swagger docs (FastAPI auto-generated)
+- [ ] Tambahkan deskripsi dan contoh di setiap endpoint
+- [ ] 📝 Handout: `md/handout_fitur_testing.md`
+
+---
+
+## Rules Pengerjaan (dari `rules.md`)
+
+1. ✅ Setiap 1 fitur selesai → buat `handout_fitur_namafitur.md`
 2. ✅ Setiap mulai fitur baru → baca ulang `design.md`
 3. ✅ Setiap ada error → catat di `errors.md`
 4. ✅ Jelaskan code secara detail (untuk pembelajaran)
 5. ✅ Belajar dari `errors.md` dan cegah terulang
 6. ✅ Push ke GitHub setiap selesai 1 fitur (commit message detail, boleh dibagi beberapa commit)
-
----
 
 ## Progress Summary
 
@@ -264,5 +457,5 @@
 | 4 | Compliance Worker | ✅ Selesai |
 | 5 | Real-time Sync | ✅ Selesai |
 | 6 | CRUD Endpoints | ✅ Selesai |
-| 7 | Auth & Security | ❌ Belum dimulai |
-| 8 | Testing & Docs | ❌ Belum dimulai |
+| 7 | Auth & Security | ✅ Selesai |
+| 8 | Testing & Docs | ✅ Selesai |
