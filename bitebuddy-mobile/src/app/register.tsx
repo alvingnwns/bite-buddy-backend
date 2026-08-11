@@ -5,24 +5,35 @@ import { useRouter } from 'expo-router';
 
 const { width } = Dimensions.get('window');
 
-export default function LoginScreen() {
+export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [doctorCode, setDoctorCode] = useState('');
+  const [patientCode, setPatientCode] = useState(''); // for child claiming
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<'child' | 'parent'>('child');
 
-  async function signInWithEmail() {
+  async function signUp() {
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email,
-      password: password,
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          role: activeTab, // saving role to metadata
+          doctor_code: activeTab === 'child' ? doctorCode : undefined,
+          patient_code: activeTab === 'parent' ? patientCode : undefined,
+        },
+      },
     });
 
     if (error) {
-      Alert.alert('Gagal Login', error.message);
+      Alert.alert('Gagal Registrasi', error.message);
     } else {
-      router.replace('/');
+      Alert.alert('Sukses', 'Registrasi berhasil! Silakan login.', [
+        { text: 'OK', onPress: () => router.replace('/login') }
+      ]);
     }
     setLoading(false);
   }
@@ -30,12 +41,11 @@ export default function LoginScreen() {
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.container}>
       <View style={styles.logoContainer}>
-        {/* Placeholder for Logo */}
         <View style={styles.logoMock} />
         <Text style={styles.logoText}>BiteBuddy</Text>
       </View>
       
-      <Text style={styles.title}>Log in as</Text>
+      <Text style={styles.title}>Register as</Text>
 
       <View style={styles.card}>
         <View style={styles.tabContainer}>
@@ -54,7 +64,7 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.formContainer}>
-          <Text style={styles.label}>Username:</Text>
+          <Text style={styles.label}>Email:</Text>
           <TextInput
             style={styles.input}
             onChangeText={(text) => setEmail(text)}
@@ -70,17 +80,40 @@ export default function LoginScreen() {
             secureTextEntry={true}
             autoCapitalize={'none'}
           />
+
+          {activeTab === 'child' ? (
+            <>
+              <Text style={styles.label}>Doctor's Code:</Text>
+              <TextInput
+                style={styles.input}
+                onChangeText={(text) => setDoctorCode(text)}
+                value={doctorCode}
+                autoCapitalize={'none'}
+                placeholder="e.g. D551"
+              />
+            </>
+          ) : (
+            <>
+              <Text style={styles.label}>Patient's Code (Optional):</Text>
+              <TextInput
+                style={styles.input}
+                onChangeText={(text) => setPatientCode(text)}
+                value={patientCode}
+                autoCapitalize={'none'}
+                placeholder="e.g. P230401"
+              />
+            </>
+          )}
           
-          <TouchableOpacity style={styles.button} onPress={signInWithEmail} disabled={loading}>
-            <Text style={styles.buttonText}>{loading ? 'Memuat...' : `Log in as ${activeTab === 'child' ? 'Child' : 'Parent'}`}</Text>
+          <TouchableOpacity style={styles.button} onPress={signUp} disabled={loading}>
+            <Text style={styles.buttonText}>{loading ? 'Memuat...' : `Register as ${activeTab === 'child' ? 'Child' : 'Parent'}`}</Text>
           </TouchableOpacity>
         </View>
       </View>
 
       <View style={styles.footer}>
-        <Text style={styles.footerText}>Don't have account yet? </Text>
-        <TouchableOpacity onPress={() => router.push('/register')}>
-          <Text style={styles.footerLink}>Register here!</Text>
+        <TouchableOpacity onPress={() => router.replace('/login')}>
+          <Text style={styles.footerLink}>Back to Login</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -90,13 +123,13 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F3FEF8', // Figma: bg-[#f3fef8]
+    backgroundColor: '#F3FEF8', 
     alignItems: 'center',
   },
   logoContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 67, // From Figma
+    marginTop: 67, 
     marginBottom: 60,
   },
   logoMock: {
@@ -108,7 +141,6 @@ const styles = StyleSheet.create({
   },
   logoText: {
     fontSize: 28,
-    fontFamily: 'sans-serif-medium',
     fontWeight: '600',
     color: '#0C3638',
   },
@@ -119,8 +151,8 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   card: {
-    backgroundColor: '#D9ECF3', // Figma card bg
-    width: width - 84, // Approximate to w-[319px] on standard screens
+    backgroundColor: '#D9ECF3',
+    width: width - 84, 
     borderRadius: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -187,14 +219,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 50,
   },
-  footerText: {
-    fontSize: 14,
-    color: '#0C3638',
-    fontWeight: '600',
-  },
   footerLink: {
-    fontSize: 14,
-    color: '#003FEC',
+    fontSize: 16,
+    color: '#0C3638',
     fontWeight: '600',
   },
 });
