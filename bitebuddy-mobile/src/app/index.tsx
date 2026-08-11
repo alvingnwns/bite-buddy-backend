@@ -77,7 +77,7 @@ export default function HomeScreen() {
             <Text style={styles.statLabel}>HP: {pet?.health}%</Text>
           </View>
           <View style={styles.progressBarBg}>
-            <View style={[styles.progressBarFill, { width: `${pet?.health}%`, backgroundColor: (pet?.health ?? 0) > 50 ? '#10B981' : '#EF4444' }]} />
+            <View style={[styles.progressBarFill, { width: `${pet?.health ?? 0}%` as any, backgroundColor: (pet?.health ?? 0) > 50 ? '#10B981' : '#EF4444' }]} />
           </View>
         </View>
       </View>
