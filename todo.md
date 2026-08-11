@@ -208,29 +208,29 @@
 ## Fase 7 — Auth & Security
 
 ### Fase 7.1 — Supabase Auth Integration
-- [ ] `app/core/auth.py` — dependency untuk extract & verify JWT dari Supabase Auth
-- [ ] `app/api/deps.py` — `get_current_user()` dependency
-- [ ] Protect semua endpoint dengan auth dependency
-- [ ] Role-based access:
+- [x] `app/core/auth.py` — dependency untuk extract & verify JWT dari Supabase Auth
+- [x] `app/api/deps.py` — `get_current_user()` dependency
+- [x] Protect semua endpoint dengan auth dependency
+- [x] Role-based access:
   - Child: hanya lihat data sendiri
   - Parent: lihat & manage data anak
   - Doctor: lihat data semua pasien yang di-assign
 
 ### Fase 7.2 — RLS Enforcement
-- [ ] `migrations/002_rls_policies.sql` — apply RLS policies dari `rls_policies.md`
-- [ ] Test RLS policies berjalan benar
-- [ ] 📝 Handout: `md/handout_fitur_auth.md`
+- [x] `migrations/002_rls_policies.sql` — apply RLS policies dari `rls_policies.md`
+- [x] Test RLS policies berjalan benar
+- [x] 📝 Handout: `md/handout_fitur_auth.md`
 
 ---
 
 ## Fase 8 — Testing & Documentation
 
 ### Fase 8.1 — Unit Tests
-- [ ] Tambah `pytest`, `pytest-asyncio`, `httpx` ke requirements (dev)
-- [ ] `tests/test_health.py` — test health & db-check endpoints
-- [ ] `tests/test_scan.py` — test scan endpoints (mock AI)
-- [ ] `tests/test_gamification.py` — test gamification logic
-- [ ] `tests/test_compliance.py` — test compliance worker
+- [x] Tambah `pytest`, `pytest-asyncio`, `httpx` ke requirements (dev)
+- [x] `tests/test_health.py` — test health & db-check endpoints
+- [x] `tests/test_scan.py` — test scan endpoints (mock AI)
+- [x] `tests/test_gamification.py` — test gamification logic
+- [x] `tests/test_compliance.py` — test compliance worker
 
 ### Fase 8.2 — API Documentation
 - [ ] Review & polish Swagger docs (FastAPI auto-generated)
