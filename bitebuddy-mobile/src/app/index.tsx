@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, SafeAreaView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ActivityIndicator, Dimensions } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useRouter } from 'expo-router';
 import { apiClient } from '../api/client';
+
+const { width } = Dimensions.get('window');
 
 type PetStatus = {
   health: number;
@@ -30,18 +32,14 @@ export default function HomeScreen() {
 
   const fetchPetStatus = async () => {
     try {
-      // Mocking fetch or assuming backend has this endpoint.
-      // In handoff it mentions GET /api/v1/users/me
       const res = await apiClient.get('/users/me');
       if (res.data && res.data.virtual_pet) {
         setPet(res.data.virtual_pet);
       } else {
-        // Dummy fallback if no real data
-        setPet({ health: 80, exp: 450, level: 3 });
+        setPet({ health: 96, exp: 67, level: 5 }); // Matching Figma values
       }
     } catch (error) {
-      console.log('Error fetching pet, using dummy data', error);
-      setPet({ health: 100, exp: 10, level: 1 });
+      setPet({ health: 96, exp: 67, level: 5 });
     } finally {
       setLoading(false);
     }
@@ -50,42 +48,82 @@ export default function HomeScreen() {
   if (authLoading || loading || !user) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#10B981" />
+        <ActivityIndicator size="large" color="#0C3638" />
       </View>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Settings / Top Bar */}
       <View style={styles.header}>
-        <Text style={styles.greeting}>Halo, {user.email?.split('@')[0]}!</Text>
-        <TouchableOpacity style={styles.profileBtn}>
-          <Text style={styles.profileText}>{user.email?.charAt(0).toUpperCase()}</Text>
+        <TouchableOpacity style={styles.iconBtn}>
+          <Text style={styles.iconText}>⚙️</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.iconBtn}>
+          <Text style={styles.iconText}>🔔</Text>
         </TouchableOpacity>
       </View>
 
-      <View style={styles.petContainer}>
-        {/* Placeholder for Virtual Pet Image */}
-        <View style={styles.petImagePlaceholder}>
-          <Text style={styles.petEmoji}>🦖</Text>
+      {/* Level Badge */}
+      <View style={styles.levelBadge}>
+        <Text style={styles.levelText}>Level {pet?.level ?? 5}</Text>
+      </View>
+
+      {/* Pet Status Card */}
+      <View style={styles.petStatusCard}>
+        <Text style={styles.petStatusTitle}>Pet Status</Text>
+        
+        <View style={styles.barRow}>
+          <Text style={styles.barLabel}>HP</Text>
+          <View style={styles.barBackground}>
+            <View style={[styles.hpBarFill, { width: `${pet?.health ?? 96}%` as any }]} />
+            <Text style={styles.barText}>{pet?.health ?? 96}</Text>
+          </View>
         </View>
 
-        <View style={styles.statsCard}>
-          <Text style={styles.statsTitle}>Status Peliharaan</Text>
-          <View style={styles.statRow}>
-            <Text style={styles.statLabel}>Level {pet?.level}</Text>
-            <Text style={styles.statLabel}>HP: {pet?.health}%</Text>
-          </View>
-          <View style={styles.progressBarBg}>
-            <View style={[styles.progressBarFill, { width: `${pet?.health ?? 0}%` as any, backgroundColor: (pet?.health ?? 0) > 50 ? '#10B981' : '#EF4444' }]} />
+        <View style={styles.barRow}>
+          <Text style={styles.barLabel}>XP</Text>
+          <View style={styles.barBackground}>
+            <View style={[styles.xpBarFill, { width: `${pet?.exp ?? 67}%` as any }]} />
+            <Text style={styles.barText}>{pet?.exp ?? 67}</Text>
           </View>
         </View>
       </View>
 
-      <View style={styles.actionsContainer}>
-        <TouchableOpacity style={styles.scanBtn} onPress={() => router.push('/scan')}>
-          <Text style={styles.scanBtnText}>📸 Scan Makanan</Text>
-          <Text style={styles.scanBtnSub}>Beri makan pet kamu!</Text>
+      {/* Placeholder for Pet Character */}
+      <View style={styles.petCharacterContainer}>
+        {/* Figma uses an illustration here */}
+        <Text style={styles.petEmojiPlaceholder}>🦖</Text>
+      </View>
+
+      {/* Bottom Menu Navigation */}
+      <View style={styles.bottomMenu}>
+        <TouchableOpacity style={styles.menuItem}>
+          <View style={styles.menuIconBox}>
+            <Text style={styles.menuEmoji}>📅</Text>
+          </View>
+          <View style={styles.menuLabelBox}>
+            <Text style={styles.menuLabel}>Schedule</Text>
+          </View>
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/scan')}>
+          <View style={styles.menuIconBox}>
+            <Text style={styles.menuEmoji}>🥣</Text>
+          </View>
+          <View style={styles.menuLabelBox}>
+            <Text style={styles.menuLabel}>Feed</Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.menuItem}>
+          <View style={styles.menuIconBox}>
+            <Text style={styles.menuEmoji}>💊</Text>
+          </View>
+          <View style={styles.menuLabelBox}>
+            <Text style={styles.menuLabel}>Heal</Text>
+          </View>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -93,45 +131,161 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8FAFC' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  container: { 
+    flex: 1, 
+    backgroundColor: '#FFFFFF', // Assuming white background before image
+    alignItems: 'center',
+  },
+  center: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center' 
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    width: '100%',
     paddingHorizontal: 24,
-    paddingTop: 20,
-    paddingBottom: 10,
+    paddingTop: 42, // from Figma
   },
-  greeting: { fontSize: 24, fontWeight: '800', color: '#1E293B' },
-  profileBtn: {
-    width: 40, height: 40, borderRadius: 20, backgroundColor: '#DBEAFE',
-    justifyContent: 'center', alignItems: 'center'
+  iconBtn: {
+    width: 57,
+    height: 57,
+    backgroundColor: '#D9ECF3',
+    borderWidth: 4,
+    borderColor: '#0C3638',
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  profileText: { fontSize: 18, fontWeight: '700', color: '#1E3A8A' },
-  petContainer: {
-    flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24,
+  iconText: {
+    fontSize: 24,
   },
-  petImagePlaceholder: {
-    width: 200, height: 200, borderRadius: 100, backgroundColor: '#E0E7FF',
-    justifyContent: 'center', alignItems: 'center', marginBottom: 40,
-    shadowColor: '#4F46E5', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.2, shadowRadius: 20, elevation: 10,
+  levelBadge: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 17,
+    paddingVertical: 11,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    marginTop: 20,
+    alignSelf: 'center',
   },
-  petEmoji: { fontSize: 80 },
-  statsCard: {
-    backgroundColor: '#FFFFFF', width: '100%', borderRadius: 24, padding: 24,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 2,
+  levelText: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#0C3638',
   },
-  statsTitle: { fontSize: 18, fontWeight: '700', color: '#334155', marginBottom: 16 },
-  statRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  statLabel: { fontSize: 16, fontWeight: '600', color: '#64748B' },
-  progressBarBg: { height: 12, backgroundColor: '#F1F5F9', borderRadius: 6, overflow: 'hidden' },
-  progressBarFill: { height: '100%', borderRadius: 6 },
-  actionsContainer: { padding: 24, paddingBottom: 40 },
-  scanBtn: {
-    backgroundColor: '#10B981', borderRadius: 20, padding: 20, alignItems: 'center',
-    shadowColor: '#10B981', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 5,
+  petStatusCard: {
+    backgroundColor: '#FEFEFF',
+    width: 337,
+    height: 138.7,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    borderTopRightRadius: 20,
+    borderTopLeftRadius: 0,
+    padding: 20,
+    paddingLeft: 27,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3.8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4.75,
+    elevation: 5,
   },
-  scanBtnText: { color: '#FFF', fontSize: 22, fontWeight: '800' },
-  scanBtnSub: { color: '#D1FAE5', fontSize: 14, fontWeight: '500', marginTop: 4 },
+  petStatusTitle: {
+    fontSize: 22.8,
+    fontWeight: '600',
+    color: '#0C3638',
+    marginBottom: 10,
+  },
+  barRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 13,
+  },
+  barLabel: {
+    fontSize: 19,
+    fontWeight: '600',
+    color: '#0C3638',
+    width: 30,
+    marginRight: 6,
+  },
+  barBackground: {
+    backgroundColor: '#D9D9D9',
+    height: 23.75,
+    borderRadius: 14.25,
+    width: 248.9,
+    justifyContent: 'center',
+  },
+  hpBarFill: {
+    backgroundColor: '#6CC55F',
+    height: 23.75,
+    borderRadius: 14.25,
+    position: 'absolute',
+    left: 0,
+  },
+  xpBarFill: {
+    backgroundColor: '#5282BB',
+    height: 23.75,
+    borderRadius: 14.25,
+    position: 'absolute',
+    left: 0,
+  },
+  barText: {
+    position: 'absolute',
+    left: 14,
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  petCharacterContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  petEmojiPlaceholder: {
+    fontSize: 100,
+  },
+  bottomMenu: {
+    backgroundColor: '#0C3638',
+    width: width - 24, // Approx 377px
+    height: 140,
+    borderRadius: 100,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 31,
+    paddingTop: 27,
+    paddingBottom: 25,
+    position: 'absolute',
+    bottom: 20, // Adjust based on screen
+  },
+  menuItem: {
+    width: 88,
+    alignItems: 'center',
+  },
+  menuIconBox: {
+    backgroundColor: '#D9FFE1',
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: -15,
+    zIndex: 1,
+  },
+  menuEmoji: {
+    fontSize: 32,
+  },
+  menuLabelBox: {
+    backgroundColor: '#116367',
+    borderRadius: 65,
+    paddingVertical: 3, // approx to height 23
+    paddingHorizontal: 12,
+    zIndex: 2,
+  },
+  menuLabel: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
 });
