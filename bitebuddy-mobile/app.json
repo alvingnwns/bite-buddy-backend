@@ -20,6 +20,17 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "scheme": "bitebuddy",
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow BiteBuddy to access your camera."
+        }
+      ],
+      "expo-status-bar"
+    ]
   }
 }
