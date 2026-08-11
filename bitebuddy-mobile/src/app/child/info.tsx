@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, TextInput, ActivityIndicator, Alert, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, TextInput, ActivityIndicator, Alert, ScrollView, Dimensions } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { apiClient } from '../../api/client';
 import { useRouter } from 'expo-router';
+
+const { width } = Dimensions.get('window');
 
 export default function InfoPage() {
   const { user } = useAuth();
@@ -50,20 +52,18 @@ export default function InfoPage() {
   const saveProfile = async () => {
     setSaving(true);
     try {
-      // Assuming PUT /users/me or /clinical/
       await apiClient.put('/users/me', {
         full_name: fullName,
         birthdate,
         gender,
       });
 
-      // Update clinical parameters
       await apiClient.post('/clinical/', {
         child_id: user?.id,
         height_cm: parseFloat(height),
         weight_kg: parseFloat(weight),
         allergies: allergies,
-        diabetes_type: 'type_1', // default
+        diabetes_type: 'type_1',
       });
 
       Alert.alert('Sukses', 'Profil berhasil diperbarui!');
@@ -82,92 +82,239 @@ export default function InfoPage() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Top Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Text style={styles.backText}>{'< Back'}</Text>
+          <Text style={styles.backBtnText}>{'<'}</Text>
         </TouchableOpacity>
         <View style={styles.headerRight}>
-          <View style={styles.iconBox}><Text>⚙️</Text></View>
-          <View style={styles.iconBox}><Text>🔔</Text></View>
+          <TouchableOpacity style={styles.iconBox}><Text style={{fontSize:24}}>⚙️</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.iconBox}><Text style={{fontSize:24}}>🔔</Text></TouchableOpacity>
         </View>
       </View>
 
       <Text style={styles.title}>Profile</Text>
 
-      <ScrollView contentContainerStyle={styles.cardContainer}>
-        <View style={styles.card}>
-          <Text style={styles.codeText}>Patient Code : {patientCode.split('-')[0]}</Text>
-
-          <View style={styles.infoBlock}>
-            <Text style={styles.infoLabel}>Username: {user?.email?.split('@')[0]}</Text>
-            <Text style={styles.infoLabel}>Doctor: {doctorCode}</Text>
+      <ScrollView contentContainerStyle={styles.cardContainerWrapper} showsVerticalScrollIndicator={false}>
+        <View style={styles.cardContainer}>
+          {/* Top Blue Banner */}
+          <View style={styles.cardHeader}>
+            <Text style={styles.patientCodeText}>
+              Patient Code : {patientCode.split('-')[0] || 'P230401'}
+            </Text>
           </View>
 
-          <View style={styles.detailsBlock}>
-            {isEditing ? (
-              <View style={styles.editForm}>
-                <TextInput style={styles.input} placeholder="Full Name" value={fullName} onChangeText={setFullName} />
-                <TextInput style={styles.input} placeholder="Birthdate (YYYY-MM-DD)" value={birthdate} onChangeText={setBirthdate} />
-                <TextInput style={styles.input} placeholder="Gender" value={gender} onChangeText={setGender} />
-                <TextInput style={styles.input} placeholder="Height (cm)" value={height} onChangeText={setHeight} keyboardType="numeric" />
-                <TextInput style={styles.input} placeholder="Weight (kg)" value={weight} onChangeText={setWeight} keyboardType="numeric" />
-                <Text style={styles.sectionTitle}>More information (Allergy, Medical History)</Text>
-                <TextInput style={styles.inputArea} placeholder="Allergies..." value={allergies} onChangeText={setAllergies} multiline />
-              </View>
-            ) : (
-              <View style={styles.viewForm}>
-                <Text style={styles.infoValue}>Full Name: {fullName}</Text>
-                <Text style={styles.infoValue}>Birthdate: {birthdate}</Text>
-                <Text style={styles.infoValue}>Gender: {gender}</Text>
-                <Text style={styles.infoValue}>Height: {height} cm</Text>
-                <Text style={styles.infoValue}>Weight: {weight} kg</Text>
-                
-                <Text style={styles.sectionTitle}>More information (Allergy, Medical History)</Text>
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>{allergies || 'None'}</Text>
+          {/* Card Body */}
+          <View style={styles.cardBody}>
+            <Text style={styles.accountText}>Username: {user?.email?.split('@')[0] || 'cherrylcantik34'}</Text>
+            <Text style={styles.accountText}>Doctor: {doctorCode || 'Dr. Alvin (D551)'}</Text>
+            
+            <View style={styles.infoBlock}>
+              <View style={styles.infoBlockRow}>
+                {/* Photo Placeholder */}
+                <View style={styles.photoCircle}>
+                  <Text style={{fontSize:20}}>👧</Text>
+                </View>
+                {/* Details */}
+                <View style={styles.detailsColumn}>
+                  {isEditing ? (
+                    <>
+                      <TextInput style={styles.input} placeholder="Full Name" value={fullName} onChangeText={setFullName} />
+                      <TextInput style={styles.input} placeholder="Birthdate" value={birthdate} onChangeText={setBirthdate} />
+                      <TextInput style={styles.input} placeholder="Gender" value={gender} onChangeText={setGender} />
+                      <TextInput style={styles.input} placeholder="Height (cm)" value={height} onChangeText={setHeight} keyboardType="numeric" />
+                      <TextInput style={styles.input} placeholder="Weight (kg)" value={weight} onChangeText={setWeight} keyboardType="numeric" />
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.detailText}>Full Name: {fullName || 'Cherryl'}</Text>
+                      <Text style={styles.detailText}>Birthdate: {birthdate || '25/12/20'}</Text>
+                      <Text style={styles.detailText}>Gender: {gender || 'Female'}</Text>
+                      <Text style={styles.detailText}>Height: {height || '80'} centimeters</Text>
+                      <Text style={styles.detailText}>Weight: {weight || '30'} kilograms</Text>
+                    </>
+                  )}
                 </View>
               </View>
+            </View>
+
+            <Text style={styles.sectionTitle}>More information (Allergy, Medical History)</Text>
+            <View style={styles.allergyBlock}>
+              {isEditing ? (
+                <TextInput 
+                  style={[styles.input, {width: '100%'}]} 
+                  placeholder="Allergies..." 
+                  value={allergies} 
+                  onChangeText={setAllergies} 
+                  multiline 
+                />
+              ) : (
+                <Text style={styles.detailText}>{allergies || 'seafood'}</Text>
+              )}
+            </View>
+
+            {isEditing ? (
+              <TouchableOpacity style={styles.actionBtn} onPress={saveProfile} disabled={saving}>
+                <Text style={styles.actionBtnText}>{saving ? 'Saving...' : 'Confirm'}</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={styles.actionBtn} onPress={() => setIsEditing(true)}>
+                <Text style={styles.actionBtnText}>Edit Profile</Text>
+              </TouchableOpacity>
             )}
           </View>
-
-          {isEditing ? (
-            <TouchableOpacity style={styles.button} onPress={saveProfile} disabled={saving}>
-              <Text style={styles.buttonText}>{saving ? 'Saving...' : 'Confirm'}</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity style={styles.button} onPress={() => setIsEditing(true)}>
-              <Text style={styles.buttonText}>Edit Profile</Text>
-            </TouchableOpacity>
-          )}
         </View>
+        <View style={{height: 50}} />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: '#F3FEF8', alignItems: 'center' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 24, paddingTop: 40 },
-  backBtn: { backgroundColor: '#D9ECF3', padding: 10, borderRadius: 10, justifyContent: 'center' },
-  backText: { color: '#0C3638', fontWeight: 'bold' },
-  headerRight: { flexDirection: 'row', gap: 10 },
-  iconBox: { width: 45, height: 45, backgroundColor: '#D9ECF3', borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  title: { fontSize: 32, fontWeight: '700', color: '#0C3638', textAlign: 'center', marginBottom: 20 },
-  cardContainer: { paddingHorizontal: 20, paddingBottom: 40 },
-  card: { backgroundColor: '#F8FAFC', borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#E2E8F0' },
-  codeText: { fontSize: 16, fontWeight: '600', color: '#64748B', marginBottom: 20, textAlign: 'center' },
-  infoBlock: { marginBottom: 20 },
-  infoLabel: { fontSize: 16, color: '#0C3638', fontWeight: '600', marginBottom: 5 },
-  detailsBlock: { backgroundColor: '#FFFFFF', borderRadius: 15, padding: 15, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 2, marginBottom: 20 },
-  editForm: { gap: 10 },
-  viewForm: { gap: 10 },
-  input: { backgroundColor: '#F1F5F9', padding: 12, borderRadius: 10, color: '#0C3638' },
-  inputArea: { backgroundColor: '#F1F5F9', padding: 12, borderRadius: 10, color: '#0C3638', height: 80, textAlignVertical: 'top' },
-  infoValue: { fontSize: 15, color: '#334155' },
-  sectionTitle: { fontSize: 16, fontWeight: '600', color: '#0C3638', marginTop: 15, marginBottom: 10 },
-  badge: { backgroundColor: '#D9FFE1', alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
-  badgeText: { color: '#116367', fontWeight: '600' },
-  button: { backgroundColor: '#5282BB', padding: 15, borderRadius: 15, alignItems: 'center' },
-  buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' },
+  header: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 35,
+    paddingTop: 50,
+    zIndex: 10,
+  },
+  backBtn: {
+    backgroundColor: '#E03B38',
+    width: 37,
+    height: 37,
+    borderRadius: 7,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  backBtnText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
+  headerRight: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  iconBox: {
+    width: 57,
+    height: 57,
+    backgroundColor: '#D9ECF3',
+    borderWidth: 4,
+    borderColor: '#0C3638',
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: -10, // Adjust alignment
+  },
+  title: {
+    fontSize: 32,
+    fontWeight: '600',
+    color: '#0C3638',
+    marginBottom: 20,
+    marginTop: 10,
+  },
+  cardContainerWrapper: {
+    alignItems: 'center',
+    width: width,
+  },
+  cardContainer: {
+    width: 319,
+    backgroundColor: '#D9ECF3',
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  cardHeader: {
+    backgroundColor: '#5282BB',
+    width: '100%',
+    height: 45,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  patientCodeText: {
+    color: '#F3FEF8',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  cardBody: {
+    padding: 20,
+  },
+  accountText: {
+    fontSize: 15,
+    color: '#0C3638',
+    fontWeight: '600',
+    marginBottom: 5,
+  },
+  infoBlock: {
+    backgroundColor: '#F3FEF8',
+    borderRadius: 10,
+    padding: 15,
+    marginTop: 15,
+  },
+  infoBlockRow: {
+    flexDirection: 'row',
+    gap: 15,
+    alignItems: 'flex-start',
+  },
+  photoCircle: {
+    width: 69,
+    height: 69,
+    borderRadius: 35,
+    borderWidth: 3,
+    borderColor: '#D518B5',
+    backgroundColor: '#CCC',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 5,
+  },
+  detailsColumn: {
+    flex: 1,
+    gap: 4,
+  },
+  detailText: {
+    fontSize: 14,
+    color: '#0C3638',
+    fontWeight: '600',
+  },
+  input: {
+    backgroundColor: '#E8F4FF',
+    borderWidth: 1,
+    borderColor: '#5282BB',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 5,
+    fontSize: 13,
+    color: '#0C3638',
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0C3638',
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  allergyBlock: {
+    backgroundColor: '#F3FEF8',
+    borderRadius: 10,
+    padding: 15,
+    minHeight: 60,
+    marginBottom: 25,
+  },
+  actionBtn: {
+    backgroundColor: '#5282BB',
+    borderRadius: 20,
+    paddingVertical: 10,
+    alignItems: 'center',
+    alignSelf: 'center',
+    width: '90%',
+  },
+  actionBtnText: {
+    color: '#E5FDEF',
+    fontSize: 20,
+    fontWeight: '600',
+  }
 });

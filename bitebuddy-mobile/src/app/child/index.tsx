@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ActivityIndicator, Dimensions } from 'react-native';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../../context/AuthContext';
 import { useRouter } from 'expo-router';
-import { apiClient } from '../api/client';
+import { apiClient } from '../../api/client';
 
 const { width } = Dimensions.get('window');
 
@@ -133,7 +133,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { 
     flex: 1, 
-    backgroundColor: '#FFFFFF', // Assuming white background before image
+    backgroundColor: '#F3FEF8',
     alignItems: 'center',
   },
   center: { 

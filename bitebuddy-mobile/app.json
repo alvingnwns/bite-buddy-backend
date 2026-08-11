@@ -29,8 +29,7 @@
         {
           "cameraPermission": "Allow BiteBuddy to access your camera."
         }
-      ],
-      "expo-status-bar"
+      ]
     ]
   }
 }
