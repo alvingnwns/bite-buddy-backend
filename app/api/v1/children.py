@@ -205,10 +205,10 @@ async def confirm_food(
     
     return {
         "history": {
-            "id": str(db_record.id),
-            "childId": str(db_record.child_id),
+            "id": str(db_record["id"]),
+            "childId": str(db_record["child_id"]),
             "type": "food",
-            "submittedAt": db_record.created_at.isoformat(),
+            "submittedAt": db_record["created_at"],
             "imageUrl": draft["public_url"],
             "status": "done",
             "foodName": draft["food_name"],
@@ -278,10 +278,10 @@ async def confirm_medicine(
     
     return {
         "history": {
-            "id": str(db_record.id),
-            "childId": str(db_record.child_id),
+            "id": str(db_record["id"]),
+            "childId": str(db_record["child_id"]),
             "type": "medicine",
-            "submittedAt": db_record.created_at.isoformat(),
+            "submittedAt": db_record["created_at"],
             "imageUrl": draft["public_url"],
             "status": "done",
             "isMedicine": draft["is_medicine"],

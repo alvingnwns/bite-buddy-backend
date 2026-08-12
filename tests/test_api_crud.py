@@ -56,7 +56,7 @@ def test_update_users_me(mock_supabase):
     
     response = client.patch(f"/api/v1/users/{MOCK_USER_ID}", json={"fullName": "Updated Name"})
     assert response.status_code == 200
-    assert response.json()["fullName"] == "Updated Name"
+    assert response.json()["full_name"] == "Updated Name"
 
 def test_get_clinical_latest(mock_supabase):
     mock_supabase.table().select().eq().order().limit().execute.return_value = MagicMock(
@@ -65,7 +65,7 @@ def test_get_clinical_latest(mock_supabase):
     
     response = client.get(f"/api/v1/clinical/{MOCK_CHILD_ID}/latest")
     assert response.status_code == 200
-    assert response.json()["weightKg"] == 20
+    assert response.json()["weight_kg"] == 20
 
 def test_create_schedule(mock_supabase):
     mock_supabase.table().insert().execute.return_value = MagicMock(
@@ -81,7 +81,7 @@ def test_create_schedule(mock_supabase):
     })
     
     assert response.status_code == 200
-    assert response.json()["mealName"] == "Breakfast"
+    assert response.json()["meal_name"] == "Breakfast"
 
 def test_get_activity_logs(mock_supabase):
     mock_supabase.table().select().eq().gte().lte().order().limit().execute.return_value = MagicMock(
