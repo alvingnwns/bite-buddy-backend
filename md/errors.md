@@ -29,20 +29,25 @@
 - **Solusi**: Kirim `ingredients` array dari API response ke analysis page, hitung nutrisi dari data berat riil
 - **Status**: Fixed
 
-### Error 6: Pet HP/XP tidak berubah, Level mulai dari 5
-- **Penyebab**: `child/index.tsx` fetch data dari `/users/me` bukan dari `/pets/{child_id}`, dan menggunakan hardcoded fallback `{ health: 96, exp: 67, level: 5 }`
-- **Solusi**: Fetch dari `/pets/${user.id}` dan gunakan default level 1
+### Error 6: Pet HP/XP tidak berubah, Level mulai dari 5, 404 pada /pets
+- **Penyebab**: Frontend fetch ke endpoint yang salah atau database belum ada pet untuk child tsb.
+- **Solusi**: Update `GET /pets/{child_id}` untuk auto-create profil Pet saat pertama kali user membuka dashboard. Level diset default 1.
 - **Status**: Fixed
 
-### Error 7: Login page overlap pada layar kecil
-- **Penyebab**: Footer menggunakan `position: 'absolute', bottom: 50` yang bisa overlap dengan form card
-- **Solusi**: Wrap dalam ScrollView, gunakan flexbox centering bukan absolute positioning
+### Error 7: Medicine API 404/Error
+- **Penyebab**: Halaman `meds.tsx` memanggil endpoint `/scan/medicine/analyze` yang tidak ada.
+- **Solusi**: Ubah ke `/scan/medicine` dan tambahkan field default (`dosage`, `route`, dll).
 - **Status**: Fixed
 
-### Error 8: CORS blocking mobile requests
-- **Penyebab**: `CORS_ORIGINS` hanya mengizinkan `localhost:3000` dan `localhost:8081`, tapi mobile mengirim request dari IP `192.168.1.10`
-- **Solusi**: Set `CORS_ORIGINS=*` di `.env` untuk development
-- **Status**: Fixed
+### Error 8: asyncio.exceptions.CancelledError pada Uvicorn
+- **Penyebab**: APScheduler (Scheduler background job) dihentikan paksa saat Uvicorn melakukan "hot-reload" karena file berubah.
+- **Solusi**: Ini adalah behavior normal dari FastAPI/Uvicorn saat mode `--reload`. Tidak perlu diperbaiki karena hanya muncul saat development.
+- **Status**: Ignored (Aman)
+
+### Error 9: Today's Schedule belum berjalan
+- **Penyebab**: Belum ada dashboard Parent/Doctor untuk menginput jadwal ke database.
+- **Solusi**: Untuk sementara aplikasi memunculkan data *dummy* jika backend me-return data kosong.
+- **Status**: Menunggu pengembangan fitur Parent & Doctor.
 
 ### Error 9: `SUPABASE_JWT_SECRET` tidak diatur
 - **Penyebab**: Field `supabase_jwt_secret` kosong di `.env` backend

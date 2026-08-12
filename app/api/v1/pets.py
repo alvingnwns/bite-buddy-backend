@@ -53,7 +53,7 @@ def get_pet(child_id: UUID) -> Any:
             # Auto-create pet
             default_pet = {
                 "child_id": str(child_id),
-                "name": "Buddy",
+                "pet_name": "Buddy",
                 "pet_type": "dog"
             }
             insert_resp = client.table("virtual_pets").insert(default_pet).execute()
