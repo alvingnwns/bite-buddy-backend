@@ -1,55 +1,53 @@
-from typing import Any, Dict, List
-from uuid import UUID
-
-from fastapi import APIRouter, HTTPException, Query
+from typing import Any, Dict, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from app.core.auth import get_current_user
 from app.core.supabase import get_supabase_service_client
 
 router = APIRouter()
 
-@router.get("/food/{child_id}", response_model=List[Dict[str, Any]])
-def get_food_logs(
-    child_id: UUID,
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0)
+@router.get("/activity-logs")
+def get_activity_logs(
+    month: str = Query(..., description="Format YYYY-MM"),
+    timezone: str = Query("Asia/Jakarta"),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ) -> Any:
     """
-    Mendapatkan riwayat makan anak.
+    Mendapatkan riwayat aktivitas berdasarkan partisi bulan.
+    Mematuhi rule global: "generate activitylogs per bulan".
     """
     client = get_supabase_service_client()
+    user_id = current_user["id"]
+    
     try:
-        start = offset
-        end = offset + limit - 1
+        # Karena kita menggunakan partitioned table di PostgreSQL (activity_logs_YYYY_MM),
+        # query ke tabel parent 'activity_logs' dengan filter created_at otomatis akan mem-prune 
+        # (hanya mencari di partisi bulan tersebut).
         
-        response = client.table("food_logs") \
-            .select("*") \
-            .eq("child_id", str(child_id)) \
-            .order("consumed_at", desc=True) \
-            .range(start, end) \
-            .execute()
-        return response.data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/medication/{child_id}", response_model=List[Dict[str, Any]])
-def get_medication_logs(
-    child_id: UUID,
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0)
-) -> Any:
-    """
-    Mendapatkan riwayat minum obat anak.
-    """
-    client = get_supabase_service_client()
-    try:
-        start = offset
-        end = offset + limit - 1
+        # Parse month bounds
+        from datetime import datetime
+        import calendar
+        year, mth = map(int, month.split("-"))
+        _, last_day = calendar.monthrange(year, mth)
         
-        response = client.table("medication_logs") \
+        start_date = f"{year}-{mth:02d}-01T00:00:00Z"
+        end_date = f"{year}-{mth:02d}-{last_day}T23:59:59Z"
+        
+        resp = client.table("activity_logs") \
             .select("*") \
-            .eq("child_id", str(child_id)) \
-            .order("administered_at", desc=True) \
-            .range(start, end) \
+            .eq("user_id", user_id) \
+            .gte("created_at", start_date) \
+            .lte("created_at", end_date) \
+            .order("created_at", desc=True) \
+            .limit(100) \
             .execute()
-        return response.data
+            
+        return {
+            "month": month,
+            "timezone": timezone,
+            "logs": resp.data if resp.data else []
+        }
     except Exception as e:
+        # Jika tabel belum ada, kita bisa kembalikan kosong untuk MVP
+        if "relation \"public.activity_logs\" does not exist" in str(e):
+            return {"month": month, "timezone": timezone, "logs": [], "warning": "Migration 008_activity_logs.sql has not been executed."}
         raise HTTPException(status_code=500, detail=str(e))
