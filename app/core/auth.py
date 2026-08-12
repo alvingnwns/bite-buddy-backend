@@ -17,9 +17,12 @@ def decode_jwt(token: str) -> Dict[str, Any]:
     Dekode dan validasi token JWT menggunakan Supabase JWT Secret.
     """
     if not settings.supabase_jwt_secret:
-        logger.warning("SUPABASE_JWT_SECRET tidak diatur! Menggunakan dummy payload untuk development.")
-        # Fallback dummy payload agar tidak crash saat dev tanpa secret
-        return {"sub": "00000000-0000-0000-0000-000000000000", "role": "authenticated", "email": "dev@example.com"}
+        logger.warning("SUPABASE_JWT_SECRET tidak diatur! Mendekode token tanpa verifikasi signature (hanya untuk development).")
+        try:
+            return jwt.decode(token, options={"verify_signature": False})
+        except Exception as e:
+            logger.error(f"Gagal mendekode token: {e}")
+            raise HTTPException(status_code=401, detail="Invalid token format")
         
     try:
         # Supabase menggunakan algoritma HS256

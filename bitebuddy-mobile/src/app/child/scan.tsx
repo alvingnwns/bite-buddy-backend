@@ -72,12 +72,30 @@ export default function ScanScreen() {
       
       const result = await response.json();
 
+      // Extract real data from API response
+      const ingredients = result?.data?.ingredients || [];
+      const photoUrl = result?.data?.photo_url || '';
+      
+      // Calculate totals from ingredients for display
+      let totalWeight = 0;
+      const ingredientNames: string[] = [];
+      ingredients.forEach((item: any) => {
+        totalWeight += item.weight_g || 0;
+        ingredientNames.push(item.ingredient || item.description || '');
+      });
+      
+      const foodName = ingredientNames.length > 0 
+        ? ingredientNames.slice(0, 2).join(' & ') 
+        : 'Detected Food';
+
       router.replace({
         pathname: '/child/analysis',
         params: {
-          foodName: result.food_name || 'Tidak diketahui',
-          xpGained: result.xp_gained || 0,
-          imageUri: imageUri
+          foodName: foodName,
+          imageUri: imageUri,
+          photoUrl: photoUrl,
+          ingredients: JSON.stringify(ingredients),
+          totalWeight: String(Math.round(totalWeight)),
         }
       });
     } catch (error) {
@@ -90,23 +108,21 @@ export default function ScanScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Top Header Background */}
       <View style={styles.topHeader}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <Text style={styles.backBtnText}>{'<'}</Text>
         </TouchableOpacity>
         
-        {/* Schedule Card (Mock for layout) */}
         <View style={styles.scheduleCard}>
           <Text style={styles.scheduleTitle}>Today's Schedule</Text>
           <View style={styles.taskList}>
             <View style={styles.taskRow}>
-              <View style={styles.taskIcon} />
+              <Text style={{fontSize: 14}}>🍳</Text>
               <Text style={styles.taskText}>breakfast (06:00-08:00)</Text>
               <View style={[styles.taskProgress, { backgroundColor: '#10B981' }]}><Text style={styles.taskProgressText}>Done</Text></View>
             </View>
             <View style={styles.taskRow}>
-              <View style={styles.taskIcon} />
+              <Text style={{fontSize: 14}}>🍲</Text>
               <Text style={styles.taskText}>lunch (11:50-13:00)</Text>
               <View style={[styles.taskProgress, { backgroundColor: '#F59E0B' }]}><Text style={styles.taskProgressText}>Late</Text></View>
             </View>
@@ -137,7 +153,7 @@ export default function ScanScreen() {
           </View>
 
           <TouchableOpacity style={styles.feedBuddyBtn} onPress={takePicture}>
-            <View style={styles.cameraIconMock} />
+            <Text style={{fontSize: 28, marginBottom: 5}}>📷</Text>
             <Text style={styles.feedBuddyText}>Feed Buddy!</Text>
           </TouchableOpacity>
         </View>
@@ -180,7 +196,6 @@ const styles = StyleSheet.create({
   scheduleCard: {
     backgroundColor: '#FFFFFF',
     width: 316,
-    height: 105,
     borderRadius: 10,
     position: 'absolute',
     top: 89,
@@ -195,9 +210,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 5,
   },
-  taskList: { flex: 1 },
+  taskList: { gap: 5 },
   taskRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 5, justifyContent: 'space-between' },
-  taskIcon: { width: 15, height: 15, backgroundColor: '#CCC', borderRadius: 7.5 },
   taskText: { fontSize: 12, color: '#374A71', fontWeight: '600', flex: 1, marginLeft: 10 },
   taskProgress: { paddingHorizontal: 10, paddingVertical: 2, borderRadius: 10 },
   taskProgressText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
@@ -232,10 +246,9 @@ const styles = StyleSheet.create({
   feedBuddyBtn: {
     backgroundColor: '#5282BB',
     width: 311,
-    height: 189,
+    height: 100,
     borderRadius: 20,
-    position: 'absolute',
-    bottom: -90, // overlaps the camera box
+    marginTop: 20,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
@@ -243,13 +256,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 2,
     elevation: 5,
-  },
-  cameraIconMock: {
-    width: 24,
-    height: 24,
-    backgroundColor: '#FFF',
-    borderRadius: 4,
-    marginBottom: 10,
   },
   feedBuddyText: {
     color: '#E5FDEF',

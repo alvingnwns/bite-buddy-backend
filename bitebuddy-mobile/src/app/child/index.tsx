@@ -1,21 +1,25 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ActivityIndicator, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Dimensions, Image, ImageBackground } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { useRouter } from 'expo-router';
 import { apiClient } from '../../api/client';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
-type PetStatus = {
-  health: number;
-  exp: number;
+type PetData = {
+  happiness: number;
+  experience_points: number;
   level: number;
+  pet_name: string;
+  pet_type: string;
+  hunger: number;
+  current_status: string;
 };
 
 export default function HomeScreen() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
-  const [pet, setPet] = useState<PetStatus | null>(null);
+  const [pet, setPet] = useState<PetData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -32,17 +36,30 @@ export default function HomeScreen() {
 
   const fetchPetStatus = async () => {
     try {
-      const res = await apiClient.get('/users/me');
-      if (res.data && res.data.virtual_pet) {
-        setPet(res.data.virtual_pet);
+      const res = await apiClient.get(`/pets/${user.id}`);
+      if (res.data) {
+        setPet(res.data);
       } else {
-        setPet({ health: 96, exp: 67, level: 5 }); // Matching Figma values
+        setDefaultPet();
       }
     } catch (error) {
-      setPet({ health: 96, exp: 67, level: 5 });
+      console.log('Pet fetch error, using defaults:', error);
+      setDefaultPet();
     } finally {
       setLoading(false);
     }
+  };
+
+  const setDefaultPet = () => {
+    setPet({
+      happiness: 100,
+      experience_points: 0,
+      level: 1,
+      pet_name: 'Buddy',
+      pet_type: 'dog',
+      hunger: 100,
+      current_status: 'happy',
+    });
   };
 
   if (authLoading || loading || !user) {
@@ -53,21 +70,38 @@ export default function HomeScreen() {
     );
   }
 
+  // Compute HP from happiness (0-100 scale)
+  const hp = pet?.happiness ?? 100;
+  // XP as percentage of level progress (experience_points mod 100)
+  const xp = (pet?.experience_points ?? 0) % 100;
+  const level = pet?.level ?? 1;
+
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
+      {/* Background - vertical stripes like Figma */}
+      <View style={styles.bgStripes}>
+        <View style={[styles.stripe, { left: '15%' }]} />
+        <View style={[styles.stripe, { left: '38%' }]} />
+        <View style={[styles.stripe, { left: '60%' }]} />
+        <View style={[styles.stripe, { left: '82%' }]} />
+      </View>
+      
+      {/* Floor */}
+      <View style={styles.floor} />
+
       {/* Settings / Top Bar */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/child/info')}>
-          <Text style={styles.iconText}>⚙️</Text>
+          <Text style={{fontSize: 22}}>⚙️</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.iconBtn}>
-          <Text style={styles.iconText}>🔔</Text>
+          <Text style={{fontSize: 22}}>🔔</Text>
         </TouchableOpacity>
       </View>
 
       {/* Level Badge */}
       <View style={styles.levelBadge}>
-        <Text style={styles.levelText}>Level {pet?.level ?? 5}</Text>
+        <Text style={styles.levelText}>Level {level}</Text>
       </View>
 
       {/* Pet Status Card */}
@@ -77,31 +111,34 @@ export default function HomeScreen() {
         <View style={styles.barRow}>
           <Text style={styles.barLabel}>HP</Text>
           <View style={styles.barBackground}>
-            <View style={[styles.hpBarFill, { width: `${pet?.health ?? 96}%` as any }]} />
-            <Text style={styles.barText}>{pet?.health ?? 96}</Text>
+            <View style={[styles.hpBarFill, { width: `${hp}%` as any }]} />
+            <Text style={styles.barText}>{hp}</Text>
           </View>
         </View>
 
         <View style={styles.barRow}>
           <Text style={styles.barLabel}>XP</Text>
           <View style={styles.barBackground}>
-            <View style={[styles.xpBarFill, { width: `${pet?.exp ?? 67}%` as any }]} />
-            <Text style={styles.barText}>{pet?.exp ?? 67}</Text>
+            <View style={[styles.xpBarFill, { width: `${xp}%` as any }]} />
+            <Text style={styles.barText}>{xp}</Text>
           </View>
         </View>
       </View>
 
-      {/* Placeholder for Pet Character */}
+      {/* Pet Character - using imported Figma sprite */}
       <View style={styles.petCharacterContainer}>
-        {/* Figma uses an illustration here */}
-        <Text style={styles.petEmojiPlaceholder}>🦖</Text>
+        <Image 
+          source={require('../../../assets/pet-happy.png')} 
+          style={styles.petImage}
+          resizeMode="contain"
+        />
       </View>
 
       {/* Bottom Menu Navigation */}
       <View style={styles.bottomMenu}>
         <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/child/schedule')}>
           <View style={styles.menuIconBox}>
-            <Text style={styles.menuEmoji}>📅</Text>
+            <Text style={{fontSize: 28}}>📅</Text>
           </View>
           <View style={styles.menuLabelBox}>
             <Text style={styles.menuLabel}>Schedule</Text>
@@ -110,7 +147,7 @@ export default function HomeScreen() {
         
         <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/child/scan')}>
           <View style={styles.menuIconBox}>
-            <Text style={styles.menuEmoji}>🥣</Text>
+            <Text style={{fontSize: 28}}>🍲</Text>
           </View>
           <View style={styles.menuLabelBox}>
             <Text style={styles.menuLabel}>Feed</Text>
@@ -119,14 +156,14 @@ export default function HomeScreen() {
 
         <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/child/meds')}>
           <View style={styles.menuIconBox}>
-            <Text style={styles.menuEmoji}>💊</Text>
+            <Text style={{fontSize: 28}}>💊</Text>
           </View>
           <View style={styles.menuLabelBox}>
             <Text style={styles.menuLabel}>Heal</Text>
           </View>
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -134,19 +171,43 @@ const styles = StyleSheet.create({
   container: { 
     flex: 1, 
     backgroundColor: '#F3FEF8',
-    alignItems: 'center',
   },
   center: { 
     flex: 1, 
     justifyContent: 'center', 
     alignItems: 'center' 
   },
+  // Background stripes (Figma dark blue vertical stripes)
+  bgStripes: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 140,
+  },
+  stripe: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: '8%',
+    backgroundColor: '#374A71',
+    opacity: 0.15,
+  },
+  floor: {
+    position: 'absolute',
+    bottom: 120,
+    left: 0,
+    right: 0,
+    height: 60,
+    backgroundColor: '#C4A882',
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     width: '100%',
     paddingHorizontal: 24,
-    paddingTop: 42, // from Figma
+    paddingTop: 50,
+    zIndex: 10,
   },
   iconBtn: {
     width: 57,
@@ -157,9 +218,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  iconText: {
-    fontSize: 24,
   },
   levelBadge: {
     backgroundColor: '#FFFFFF',
@@ -178,13 +236,13 @@ const styles = StyleSheet.create({
   petStatusCard: {
     backgroundColor: '#FEFEFF',
     width: 337,
-    height: 138.7,
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
     borderTopRightRadius: 20,
     borderTopLeftRadius: 0,
     padding: 20,
     paddingLeft: 27,
+    alignSelf: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 3.8 },
     shadowOpacity: 0.25,
@@ -192,7 +250,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   petStatusTitle: {
-    fontSize: 22.8,
+    fontSize: 22,
     fontWeight: '600',
     color: '#0C3638',
     marginBottom: 10,
@@ -200,7 +258,7 @@ const styles = StyleSheet.create({
   barRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 13,
+    marginBottom: 10,
   },
   barLabel: {
     fontSize: 19,
@@ -211,22 +269,22 @@ const styles = StyleSheet.create({
   },
   barBackground: {
     backgroundColor: '#D9D9D9',
-    height: 23.75,
-    borderRadius: 14.25,
-    width: 248.9,
+    height: 24,
+    borderRadius: 14,
+    flex: 1,
     justifyContent: 'center',
   },
   hpBarFill: {
     backgroundColor: '#6CC55F',
-    height: 23.75,
-    borderRadius: 14.25,
+    height: 24,
+    borderRadius: 14,
     position: 'absolute',
     left: 0,
   },
   xpBarFill: {
     backgroundColor: '#5282BB',
-    height: 23.75,
-    borderRadius: 14.25,
+    height: 24,
+    borderRadius: 14,
     position: 'absolute',
     left: 0,
   },
@@ -241,22 +299,24 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 5,
   },
-  petEmojiPlaceholder: {
-    fontSize: 100,
+  petImage: {
+    width: 220,
+    height: 220,
   },
   bottomMenu: {
     backgroundColor: '#0C3638',
-    width: width - 24, // Approx 377px
+    width: width - 24,
     height: 140,
     borderRadius: 100,
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingHorizontal: 31,
-    paddingTop: 27,
-    paddingBottom: 25,
+    paddingTop: 5,
+    alignSelf: 'center',
     position: 'absolute',
-    bottom: 20, // Adjust based on screen
+    bottom: 20,
   },
   menuItem: {
     width: 88,
@@ -272,13 +332,10 @@ const styles = StyleSheet.create({
     marginBottom: -15,
     zIndex: 1,
   },
-  menuEmoji: {
-    fontSize: 32,
-  },
   menuLabelBox: {
     backgroundColor: '#116367',
     borderRadius: 65,
-    paddingVertical: 3, // approx to height 23
+    paddingVertical: 3,
     paddingHorizontal: 12,
     zIndex: 2,
   },

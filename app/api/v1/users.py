@@ -25,7 +25,8 @@ def get_my_profile(
     """Ambil profil user yang sedang login.
 
     Menggunakan JWT dari header Authorization untuk identifikasi.
-    (Pada fase ini, current_user masih mock — akan diganti di Fase 7)
+    Jika user belum ada di public.users (misal: register sebelum fix),
+    maka otomatis di-create dari data JWT.
     """
     client = get_supabase_service_client()
     try:
@@ -36,9 +37,25 @@ def get_my_profile(
             .execute()
         )
         if not response.data:
+            # Auto-create: user ada di auth.users tapi belum di public.users
+            email = current_user.get("email", "unknown@example.com")
+            role = current_user.get("user_metadata", {}).get("role", "child")
+            insert_resp = (
+                client.table("users")
+                .insert({
+                    "id": current_user["id"],
+                    "email": email,
+                    "full_name": email.split("@")[0],
+                    "role": role,
+                    "is_active": True,
+                })
+                .execute()
+            )
+            if insert_resp.data:
+                return insert_resp.data[0]
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="User tidak ditemukan"
+                detail="User tidak ditemukan dan gagal dibuat otomatis"
             )
         return response.data[0]
     except Exception as e:

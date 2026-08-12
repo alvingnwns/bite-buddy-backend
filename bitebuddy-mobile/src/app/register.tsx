@@ -30,7 +30,22 @@ export default function RegisterScreen() {
 
     if (error) {
       Alert.alert('Gagal Registrasi', error.message);
-    } else {
+    } else if (data?.user) {
+      // Sisipkan row ke public.users agar /api/v1/users/me bisa menemukan data
+      const { error: insertError } = await supabase
+        .from('users')
+        .insert({
+          id: data.user.id,
+          email: data.user.email,
+          full_name: email.split('@')[0], // nama sementara dari email
+          role: activeTab,
+          is_active: true,
+        });
+
+      if (insertError) {
+        console.log('Insert public.users gagal (mungkin sudah ada):', insertError.message);
+      }
+
       Alert.alert('Sukses', 'Registrasi berhasil! Silakan login.', [
         { text: 'OK', onPress: () => router.replace('/login') }
       ]);

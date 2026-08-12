@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, Dimensions } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
 const { width } = Dimensions.get('window');
@@ -8,18 +8,31 @@ export default function AnalysisResult() {
   const router = useRouter();
   const params = useLocalSearchParams();
   
-  const foodName = params.foodName || 'Homecook Spaghetti';
-  const xpGained = params.xpGained || 0;
-  const imageUri = params.imageUri || null;
-  const calories = params.calories || 220;
-  const sugar = params.sugar || 8;
-  const carbs = params.carbs || 42.95;
-  const fiber = params.fiber || 2.5;
-  const protein = params.protein || 8.06;
-  const fat = params.fat || 1.29;
+  const foodName = (params.foodName as string) || 'Detected Food';
+  const imageUri = (params.imageUri as string) || null;
+  const totalWeight = parseInt((params.totalWeight as string) || '0', 10);
+  
+  // Parse real ingredients from API
+  let ingredients: any[] = [];
+  try {
+    ingredients = JSON.parse((params.ingredients as string) || '[]');
+  } catch { ingredients = []; }
+
+  // Calculate nutrition estimates from ingredients weight
+  // These are rough estimates - in production the /food/confirm endpoint calculates exact values
+  const totalGrams = totalWeight || ingredients.reduce((sum: number, i: any) => sum + (i.weight_g || 0), 0);
+  const estimatedCalories = Math.round(totalGrams * 1.2); // rough kcal estimate
+  const estimatedSugar = Math.round(totalGrams * 0.04 * 10) / 10;
+  const estimatedCarbs = Math.round(totalGrams * 0.24 * 100) / 100;
+  const estimatedFiber = Math.round(totalGrams * 0.01 * 10) / 10;
+  const estimatedProtein = Math.round(totalGrams * 0.04 * 100) / 100;
+  const estimatedFat = Math.round(totalGrams * 0.007 * 100) / 100;
+
+  const sugarCategory = estimatedSugar < 5 ? 'low' : estimatedSugar < 15 ? 'medium' : 'high';
+  const sugarCategoryColor = sugarCategory === 'low' ? '#10B981' : sugarCategory === 'medium' ? '#E03B38' : '#DC2626';
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scrollContent}>
       {/* Back Button */}
       <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
         <Text style={styles.backBtnText}>{'<'}</Text>
@@ -31,55 +44,66 @@ export default function AnalysisResult() {
       <View style={styles.cardContainer}>
         {/* Top Header inside Card */}
         <View style={styles.cardHeader}>
-          <Text style={styles.foodNameText}>{foodName}</Text>
           <Text style={styles.aiDetectedText}>AI detected</Text>
+          <Text style={styles.foodNameText}>{foodName}</Text>
         </View>
         
         <Text style={styles.estSugarTitle}>Estimated Sugar Content</Text>
         
+        {/* Sugar Content Badge */}
+        <View style={styles.sugarBadge}>
+          <Text style={styles.sugarValue}>{estimatedSugar} g/portion</Text>
+        </View>
+        <View style={styles.sugarCategoryBadge}>
+          <Text style={[styles.sugarCategoryText, { color: sugarCategoryColor }]}>Category: {sugarCategory}</Text>
+        </View>
+
         {/* Middle Section: Image & Portion */}
         <View style={styles.middleRow}>
           {/* Image Box */}
           <View style={styles.imageBox}>
             {imageUri ? (
-              <Image source={{ uri: imageUri as string }} style={styles.foodImage} />
+              <Image source={{ uri: imageUri }} style={styles.foodImage} />
             ) : (
-              <View style={styles.imagePlaceholder} />
+              <View style={styles.imagePlaceholder}><Text style={{fontSize: 40}}>🍽️</Text></View>
             )}
           </View>
           
           {/* Portion Box */}
           <View style={styles.portionBox}>
-            <Text style={styles.portionTitle}>Portion size</Text>
-            <View style={styles.portionValueRow}>
-              <Text style={styles.portionNumber}>180</Text>
-              <Text style={styles.portionUnit}>gram</Text>
-            </View>
-            <TouchableOpacity style={styles.editBtn}>
-              <Text style={styles.editBtnText}>Edit</Text>
-            </TouchableOpacity>
+            <Text style={styles.portionTitle}>Portion{'\n'}size</Text>
+            <Text style={styles.portionNumber}>{totalGrams}</Text>
+            <Text style={styles.portionUnit}>gram</Text>
           </View>
         </View>
 
-        {/* Sugar Content Badge */}
-        <View style={styles.sugarBadge}>
-          <Text style={styles.sugarValue}>{sugar} g/portion</Text>
-          <View style={styles.sugarCategory}>
-            <Text style={styles.sugarCategoryText}>Category: medium</Text>
+        {/* Detected Ingredients List */}
+        {ingredients.length > 0 && (
+          <View style={styles.ingredientsList}>
+            <Text style={styles.ingredientsTitle}>Detected Ingredients:</Text>
+            {ingredients.map((item: any, idx: number) => (
+              <Text key={idx} style={styles.ingredientItem}>
+                • {item.ingredient || item.description} ({item.weight_g}g)
+              </Text>
+            ))}
           </View>
-        </View>
+        )}
 
         {/* Nutrition Facts Bottom Block */}
         <View style={styles.nutritionBlock}>
-          <Text style={styles.nutritionTitle}>Nutrition Facts</Text>
-          <View style={styles.nutritionList}>
-            <Text style={styles.nutritionText}>Calories: {calories} kkal</Text>
-            <Text style={styles.nutritionText}>Carbs: {carbs} gram</Text>
-            <Text style={styles.nutritionText}>Fiber: {fiber} gram</Text>
-            <Text style={styles.nutritionText}>Protein: {protein} gram</Text>
-            <Text style={styles.nutritionText}>Fat: {fat} gram</Text>
-            <Text style={styles.xpText}>XP Gained: +{xpGained}</Text>
+          <View style={styles.nutritionLeft}>
+            <Text style={styles.nutritionTitle}>Nutrition Facts</Text>
+            <Text style={styles.nutritionText}>Calories: {estimatedCalories} kkal</Text>
+            <Text style={styles.nutritionText}>Carbs: {estimatedCarbs} gram</Text>
+            <Text style={styles.nutritionText}>Fiber: {estimatedFiber} gram</Text>
+            <Text style={styles.nutritionText}>Protein: {estimatedProtein} gram</Text>
+            <Text style={styles.nutritionText}>Fat: {estimatedFat} gram</Text>
           </View>
+          <Image 
+            source={require('../../../assets/pet-glasses.png')} 
+            style={styles.petGlasses}
+            resizeMode="contain"
+          />
         </View>
       </View>
 
@@ -87,15 +111,20 @@ export default function AnalysisResult() {
       <TouchableOpacity style={styles.confirmBtn} onPress={() => router.replace('/child')}>
         <Text style={styles.confirmBtnText}>Confirm</Text>
       </TouchableOpacity>
-    </View>
+      
+      <View style={{height: 40}} />
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  scrollContainer: {
     flex: 1,
     backgroundColor: '#F3FEF8',
+  },
+  scrollContent: {
     alignItems: 'center',
+    paddingBottom: 20,
   },
   backBtn: {
     backgroundColor: '#E03B38',
@@ -112,49 +141,74 @@ const styles = StyleSheet.create({
   backBtnText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
   pageTitle: {
     fontSize: 32,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#0C3638',
-    marginTop: 100,
-    marginBottom: 20,
+    marginTop: 95,
+    marginBottom: 15,
   },
   cardContainer: {
     backgroundColor: '#374171',
-    width: 324,
-    height: 556,
+    width: width - 70,
     borderRadius: 20,
     shadowColor: '#374171',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.25,
     shadowRadius: 20,
     elevation: 8,
-    position: 'relative',
-    marginTop: 10,
+    overflow: 'hidden',
   },
   cardHeader: {
     backgroundColor: '#5282BB',
     width: '100%',
-    height: 75,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    justifyContent: 'center',
+    paddingVertical: 15,
     alignItems: 'center',
   },
-  foodNameText: {
-    color: 'white',
-    fontSize: 24,
-    fontWeight: '600',
-  },
   aiDetectedText: {
-    color: 'white',
+    color: '#D9ECF3',
     fontSize: 14,
     fontWeight: '600',
   },
+  foodNameText: {
+    color: 'white',
+    fontSize: 22,
+    fontWeight: '700',
+  },
   estSugarTitle: {
     color: '#F9FDFF',
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
     textAlign: 'center',
-    marginTop: 15,
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  sugarBadge: {
+    backgroundColor: '#F3B73B',
+    borderWidth: 4,
+    borderColor: '#E8F4FF',
+    borderRadius: 10,
+    width: 257,
+    height: 50,
+    alignSelf: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sugarValue: {
+    color: '#FF6200',
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
+  sugarCategoryBadge: {
+    backgroundColor: '#E8F4FF',
+    paddingHorizontal: 14,
+    paddingVertical: 3,
+    borderRadius: 20,
+    alignSelf: 'center',
+    marginTop: -5,
+    zIndex: 2,
+  },
+  sugarCategoryText: {
+    fontSize: 10,
+    fontWeight: '600',
   },
   middleRow: {
     flexDirection: 'row',
@@ -164,37 +218,34 @@ const styles = StyleSheet.create({
   },
   imageBox: {
     width: 133,
-    height: 189,
-    borderWidth: 5,
+    height: 170,
+    borderWidth: 4,
     borderColor: '#5282BB',
     borderRadius: 10,
     overflow: 'hidden',
     backgroundColor: '#CCC',
   },
   foodImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  imagePlaceholder: { width: '100%', height: '100%', backgroundColor: '#D9D9D9' },
+  imagePlaceholder: { width: '100%', height: '100%', backgroundColor: '#D9D9D9', justifyContent: 'center', alignItems: 'center' },
   portionBox: {
     width: 113,
-    height: 189,
+    height: 170,
     backgroundColor: 'white',
     borderRadius: 10,
     alignItems: 'center',
-    paddingTop: 20,
+    justifyContent: 'center',
+    paddingVertical: 10,
   },
   portionTitle: {
     color: '#374171',
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
     textAlign: 'center',
-    marginBottom: 10,
-  },
-  portionValueRow: {
-    alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 5,
   },
   portionNumber: {
     color: '#0C3638',
-    fontSize: 32,
+    fontSize: 36,
     fontWeight: 'bold',
   },
   portionUnit: {
@@ -203,91 +254,58 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginTop: -5,
   },
-  editBtn: {
-    backgroundColor: '#374171',
-    paddingHorizontal: 20,
-    paddingVertical: 5,
-    borderRadius: 20,
+  ingredientsList: {
+    paddingHorizontal: 25,
+    marginTop: 12,
   },
-  editBtnText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
+  ingredientsTitle: {
+    color: '#E8F4FF',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 4,
   },
-  sugarBadge: {
-    backgroundColor: '#F3B73B',
-    borderWidth: 4,
-    borderColor: '#E8F4FF',
-    borderRadius: 10,
-    width: 257,
-    height: 57,
-    alignSelf: 'center',
-    marginTop: 15,
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
-  },
-  sugarValue: {
-    color: '#FF6200',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  sugarCategory: {
-    position: 'absolute',
-    bottom: -10,
-    right: 20,
-    backgroundColor: '#E8F4FF',
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 20,
-  },
-  sugarCategoryText: {
-    color: '#E03B38',
-    fontSize: 10,
-    fontWeight: '600',
+  ingredientItem: {
+    color: '#D9ECF3',
+    fontSize: 11,
+    fontWeight: '500',
   },
   nutritionBlock: {
     backgroundColor: '#D9ECF3',
-    width: 324,
-    height: 147,
-    position: 'absolute',
-    bottom: 0,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 15,
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    marginTop: 15,
+  },
+  nutritionLeft: {
+    flex: 1,
   },
   nutritionTitle: {
     color: '#374171',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 5,
   },
-  nutritionList: {
-    alignItems: 'flex-start',
-  },
   nutritionText: {
     color: '#5282BB',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 'bold',
   },
-  xpText: {
-    color: '#10B981',
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginTop: 5,
+  petGlasses: {
+    width: 90,
+    height: 90,
   },
   confirmBtn: {
     backgroundColor: '#374171',
     borderWidth: 3,
     borderColor: '#272E51',
-    width: 324,
-    height: 45,
+    width: width - 70,
+    height: 48,
     borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    position: 'absolute',
-    bottom: 40,
+    marginTop: 20,
     shadowColor: '#374171',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.5,
@@ -296,7 +314,7 @@ const styles = StyleSheet.create({
   },
   confirmBtnText: {
     color: '#E8F4FF',
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: 'bold',
   }
 });

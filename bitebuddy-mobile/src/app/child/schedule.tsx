@@ -2,20 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ScrollView, Dimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { apiClient } from '../../api/client';
+import { useAuth } from '../../context/AuthContext';
 
 const { width } = Dimensions.get('window');
 
 export default function SchedulePage() {
   const router = useRouter();
+  const { user } = useAuth();
   const [schedules, setSchedules] = useState<any[]>([]);
 
   useEffect(() => {
-    fetchSchedules();
-  }, []);
+    if (user?.id) fetchSchedules();
+  }, [user]);
 
   const fetchSchedules = async () => {
     try {
-      const res = await apiClient.get('/schedules/');
+      const res = await apiClient.get(`/schedules/${user.id}`);
       setSchedules(res.data || []);
     } catch (e) {
       console.log('Error fetching schedules', e);
