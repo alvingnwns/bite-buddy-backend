@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Alert, ActivityIndicator, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Alert, ActivityIndicator, Dimensions, TextInput } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../../api/client';
@@ -13,6 +13,8 @@ export default function MedsPage() {
   const [permission, requestPermission] = useCameraPermissions();
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [dosage, setDosage] = useState('1');
+  const [dosageUnit, setDosageUnit] = useState('pill');
   const cameraRef = useRef<CameraView>(null);
   const router = useRouter();
 
@@ -57,9 +59,9 @@ export default function MedsPage() {
       } as any);
       formData.append('child_id', user.id);
       formData.append('administered_by', user.id);
-      formData.append('dosage', '1');
-      formData.append('dosage_unit', 'pill');
-      formData.append('route', 'oral');
+      formData.append('dosage', dosage);
+      formData.append('dosage_unit', dosageUnit);
+      formData.append('route', dosageUnit.toLowerCase() === 'pill' ? 'oral' : 'subcutaneous');
 
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token || '';
@@ -79,17 +81,11 @@ export default function MedsPage() {
 
       const result = await response.json();
 
-      router.replace({
-        pathname: '/child/analysis',
-        params: {
-          foodName: result.medicine_name || 'Tidak diketahui',
-          xpGained: result.xp_gained || 0,
-          imageUri: imageUri
-        }
-      });
-    } catch (error) {
+      Alert.alert('Sukses', `Berhasil mencatat obat: ${result.data?.medication_detected} (${dosage} ${dosageUnit})`);
+      router.replace('/child');
+    } catch (error: any) {
       console.log(error);
-      Alert.alert('Gagal', 'Terjadi kesalahan saat mendeteksi obat.');
+      Alert.alert('Gagal', error.message || 'Terjadi kesalahan saat mendeteksi obat.');
     } finally {
       setLoading(false);
     }
@@ -123,6 +119,26 @@ export default function MedsPage() {
           <View style={styles.cameraBox}>
             <Image source={{ uri: imageUri }} style={styles.previewImage} />
           </View>
+          
+          <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>Dosis Obat:</Text>
+            <TextInput
+              style={styles.input}
+              value={dosage}
+              onChangeText={setDosage}
+              keyboardType="numeric"
+              placeholder="Misal: 1"
+            />
+            
+            <Text style={styles.inputLabel}>Satuan (pill/IU/ml):</Text>
+            <TextInput
+              style={styles.input}
+              value={dosageUnit}
+              onChangeText={setDosageUnit}
+              placeholder="Misal: pill"
+            />
+          </View>
+
           <View style={styles.actionRow}>
              <TouchableOpacity style={[styles.actionBtn, styles.btnSecondary]} onPress={() => setImageUri(null)}>
                <Text style={styles.btnTextSecondary}>Ulangi</Text>
@@ -286,4 +302,7 @@ const styles = StyleSheet.create({
   btnTextSecondary: { color: '#475569', fontSize: 16, fontWeight: '700' },
   btnPrimary: { backgroundColor: '#5282BB' },
   btnTextPrimary: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+  inputContainer: { width: 273, marginTop: 15 },
+  inputLabel: { fontSize: 14, fontWeight: 'bold', color: '#0C3638', marginBottom: 5 },
+  input: { backgroundColor: '#FFF', borderWidth: 2, borderColor: '#5282BB', borderRadius: 8, paddingHorizontal: 15, paddingVertical: 10, marginBottom: 15, fontWeight: 'bold' }
 });

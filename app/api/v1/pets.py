@@ -3,16 +3,16 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
 from app.core.supabase import get_supabase_service_client
-from pydantic import BaseModel
+from app.models.base import CamelModel
 
 router = APIRouter()
 
-class PetCreate(BaseModel):
+class PetCreate(CamelModel):
     child_id: UUID
     name: str
     pet_type: str = "dog"
 
-class PetUpdate(BaseModel):
+class PetUpdate(CamelModel):
     name: str | None = None
     pet_type: str | None = None
 

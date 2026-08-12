@@ -24,7 +24,8 @@ class IngredientEstimate(BaseModel):
     weight_g: float = Field(description="Estimasi berat bahan makanan dalam gram")
 
 class FoodDetectionResponse(BaseModel):
-    ingredients: List[IngredientEstimate] = Field(description="Daftar bahan makanan yang terdeteksi")
+    is_food: bool = Field(description="False jika gambar BUKAN makanan (contoh: hewan, manusia, benda mati, obat). True jika gambar berisi makanan yang bisa dimakan.")
+    ingredients: List[IngredientEstimate] = Field(description="Daftar bahan makanan yang terdeteksi. Kosongkan jika is_food adalah false.")
 
 class AIService:
     def __init__(self) -> None:
@@ -52,9 +53,10 @@ class AIService:
             model = genai.GenerativeModel(self.food_model_name)
             
             prompt = (
-                "You are an expert nutritionist. Analyze this food image and list all the fundamental ingredients "
-                "present in the food. For each ingredient, estimate its weight in grams. "
-                "Provide the name in simple English (e.g. 'tomato', 'chicken breast', 'rice')."
+                "You are an expert nutritionist. First, determine if the image actually contains edible food. "
+                "If it does NOT contain food (e.g. it's a cat, a car, a person, or medicine), set 'is_food' to false and leave 'ingredients' empty. "
+                "If it IS food, set 'is_food' to true and list all fundamental ingredients present in the food. "
+                "For each ingredient, estimate its weight in grams. Provide the name in simple English (e.g. 'tomato')."
             )
             
             # Mempersiapkan gambar
@@ -75,6 +77,13 @@ class AIService:
             
             result_text = response.text
             data = json.loads(result_text)
+            
+            if not data.get("is_food", True):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Gambar tidak terdeteksi sebagai makanan. Mohon unggah foto makanan yang jelas."
+                )
+                
             ingredients = data.get("ingredients", [])
             
             # Mapping ke fdcId
@@ -101,6 +110,8 @@ class AIService:
                 
             return mapped_ingredients
 
+        except HTTPException as he:
+            raise he
         except Exception as e:
             logger.error(f"Error pada Gemini Food Detection: {str(e)}")
             raise HTTPException(
@@ -120,10 +131,11 @@ class AIService:
             model = genai.GenerativeModel(self.medicine_model_name)
             
             prompt = (
-                "Identify if this image contains any medicine or medical equipment. "
+                "Identify if this image contains any medicine, medical equipment, or pills. "
+                "If it does NOT contain any medicine (e.g. it is a cat, food, animal, or person), reply EXACTLY with 'Not Medicine'. "
                 "If it's an insulin pen or syringe, reply with 'insulin pen'. "
                 "If it's a pill or medicine bottle, reply with 'medicine'. "
-                "Otherwise, reply with 'Unknown Medicine'. "
+                "Otherwise, if it's medical but unknown, reply with 'Unknown Medicine'. "
                 "Only output the exact category name."
             )
             
@@ -141,6 +153,12 @@ class AIService:
             
             label = response.text.strip()
             
+            if "Not Medicine" in label:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Gambar tidak terdeteksi sebagai obat atau alat medis. Mohon unggah foto obat yang jelas."
+                )
+            
             valid_labels = ["insulin pen", "medicine", "Unknown Medicine"]
             for valid in valid_labels:
                 if valid.lower() in label.lower():
@@ -148,6 +166,8 @@ class AIService:
                     
             return "Unknown Medicine"
             
+        except HTTPException as he:
+            raise he
         except Exception as e:
             logger.error(f"Error pada Gemini Medicine Detection: {str(e)}")
             raise HTTPException(

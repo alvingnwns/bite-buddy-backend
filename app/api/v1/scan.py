@@ -3,7 +3,8 @@ from typing import Optional, List, Any
 from uuid import UUID
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status, Body
-from pydantic import BaseModel, Field
+from pydantic import Field
+from app.models.base import CamelModel
 
 from app.models.database import MealType
 from app.services.ai_service import AIService
@@ -29,13 +30,13 @@ def _validate_file(file: UploadFile) -> None:
         )
 
 # Model untuk endpoint confirm
-class ConfirmedIngredient(BaseModel):
+class ConfirmedIngredient(CamelModel):
     ingredient: str = Field(description="Nama bahan makanan asli dari AI")
     description: str = Field(description="Deskripsi dari FoodData Central")
     weight_g: float = Field(description="Berat dalam gram", gt=0)
     fdcId: Optional[int] = Field(None, description="FoodData Central ID")
 
-class ConfirmFoodRequest(BaseModel):
+class ConfirmFoodRequest(CamelModel):
     child_id: UUID
     logged_by: UUID
     meal_type: MealType
@@ -64,6 +65,8 @@ async def analyze_food(
         ai_task = ai_service.detect_food_ingredients(image_bytes=file_bytes, mime_type=file.content_type or "image/jpeg")
 
         public_url, detected_ingredients = await asyncio.gather(upload_task, ai_task)
+    except HTTPException as he:
+        raise he
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -152,6 +155,8 @@ async def scan_medicine(
         ai_task = ai_service.detect_medicine(image_bytes=file_bytes, mime_type=file.content_type or "image/jpeg")
 
         public_url, detected_medicine = await asyncio.gather(upload_task, ai_task)
+    except HTTPException as he:
+        raise he
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

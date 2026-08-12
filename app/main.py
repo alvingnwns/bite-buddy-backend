@@ -27,6 +27,35 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import JSONResponse
+    from fastapi import Request
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        # Format Pydantic errors to: {"fields": {"field_name": ["error msg"]}}
+        fields = {}
+        for err in exc.errors():
+            # Get the field name from the location tuple, e.g. ('body', 'username')
+            loc = err.get('loc', [])
+            field_name = str(loc[-1]) if len(loc) > 0 else "unknown"
+            # In camelCase validation, field names might need fixing, but pydantic should handle it with aliases
+            if field_name not in fields:
+                fields[field_name] = []
+            fields[field_name].append(err.get('msg', 'Invalid value'))
+            
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": "validation_error",
+                "message": "One or more fields are invalid.",
+                "details": {
+                    "fields": fields
+                },
+                "requestId": request.headers.get("x-request-id", "unknown")
+            },
+        )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,

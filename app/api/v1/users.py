@@ -99,6 +99,35 @@ def get_children(
             detail=str(e)
         )
 
+@router.get("/{user_id}/patients", response_model=List[Dict[str, Any]])
+def get_patients(
+    user_id: UUID,
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> Any:
+    """Ambil daftar pasien dari seorang dokter (berdasarkan doctor_id).
+    """
+    client = get_supabase_service_client()
+    try:
+        start = offset
+        end = offset + limit - 1
+
+        response = (
+            client.table("users")
+            .select("id, full_name, email, birth_date, gender, avatar_url, is_active, created_at")
+            .eq("doctor_id", str(user_id))
+            .order("created_at", desc=True)
+            .range(start, end)
+            .execute()
+        )
+        return response.data
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
 
 @router.patch("/{user_id}", response_model=Dict[str, Any])
 def update_user_profile(

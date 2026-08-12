@@ -5,11 +5,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.core.auth import get_current_user
 
 client = TestClient(app)
 
 MOCK_CHILD_ID = str(uuid.uuid4())
 MOCK_USER_ID = "00000000-0000-0000-0000-000000000000"
+
+app.dependency_overrides[get_current_user] = lambda: {"id": MOCK_USER_ID, "role": "parent"}
 
 # Mock all Supabase client calls
 @pytest.fixture(autouse=True)

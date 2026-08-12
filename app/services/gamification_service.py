@@ -181,20 +181,22 @@ class GamificationService:
                 .execute()
             )
             if not response.data:
-                # Pet belum dibuat — kembalikan nilai default tanpa error
-                return {
-                    "exp_gained": 0,
-                    "level_up": False,
-                    "new_level": 1,
-                    "new_happiness": 100,
-                    "new_hunger": 100,
-                    "current_status": "neutral",
+                # Pet belum dibuat — buat pet default terlebih dahulu
+                default_pet = {
+                    "child_id": str(child_id),
+                    "pet_name": "Buddy",
+                    "pet_type": "dog"
                 }
-            pet = cast(Dict[str, Any], response.data[0])
+                insert_resp = client.table("virtual_pets").insert(default_pet).execute()
+                if not insert_resp.data:
+                    raise HTTPException(status_code=500, detail="Gagal membuat peliharaan otomatis")
+                pet = cast(Dict[str, Any], insert_resp.data[0])
+            else:
+                pet = cast(Dict[str, Any], response.data[0])
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Gagal mengambil data Virtual Pet: {str(e)}",
+                detail=f"Gagal mengambil/membuat data Virtual Pet: {str(e)}",
             )
 
         current_exp = pet["experience_points"]

@@ -54,3 +54,17 @@
 - **Dampak**: Token di-decode tanpa verifikasi signature (tidak aman untuk production)
 - **Solusi**: Ambil JWT secret dari Supabase Dashboard → Project Settings → API → JWT Secret, tambahkan ke `.env`
 - **Status**: Pending (user perlu menambahkan)
+
+### Error 10: 500 Internal Server Error (Foreign Key Constraint on food_logs)
+- **Penyebab**: Script `seed_users.py` gagal meng-*upsert* data ke `public.users` saat menemui error "user already registered" pada `auth.users`, sehingga UUID antara `auth.users` dan `public.users` tidak tersinkronisasi/kosong, menyebabkan operasi yang membutuhkan `child_id` (seperti insert ke `food_logs`) gagal di database (violates foreign key constraint).
+- **Solusi**: Script `seed_users.py` telah diperbaiki agar menangkap pesan "already been registered", mengambil UUID dari `auth.users`, dan menyimpannya ke `public.users`. Akun lama dengan UUID mismatch (e221edbf-...) di public.users telah dihapus dan di-*seed* ulang.
+- **Status**: Fixed
+
+### Error 11: XP dan Level Pet tidak bertambah setelah Scan Makanan
+- **Penyebab**: Ada dua faktor utama:
+  1. **Race Condition Pet Creation**: User melakukan *Scan* (Confirm Food) **sebelum** profil pet sempat terbuat di dashboard. Service gamifikasi tidak menemukan pet dan membuang EXP tersebut (0 EXP).
+  2. **Rule Engine AI**: Makanan yang di-scan (contoh: Spaghetti) dievaluasi oleh Gemini AI sebagai `is_healthy: False` (kurang sehat/tinggi karbo). Berdasarkan *rule engine* di `gamification_service`, makanan tidak sehat memberikan `0 EXP` dan penalti `-20 Happiness`.
+- **Solusi**: 
+  - Ditambahkan auto-create profil Pet secara langsung di dalam `gamification_service.update_pet_status()` sebagai *fallback* agar EXP tidak hilang meskipun user belum pernah membuka dashboard.
+  - Edukasi ke user bahwa makanan tidak sehat (Junk Food/Tinggi Karbo) memang disengaja tidak memberikan EXP.
+- **Status**: Fixed

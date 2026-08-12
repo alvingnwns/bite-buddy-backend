@@ -1,7 +1,9 @@
 import os
+from unittest.mock import patch
 from app.core.supabase import get_supabase_service_client
 
-def test_e2e_scan_food_healthy(test_client, setup_e2e_data):
+@patch("app.api.v1.scan.ai_service.detect_food_ingredients")
+def test_e2e_scan_food_healthy(mock_detect, test_client, setup_e2e_data):
     """
     Test E2E mengunggah gambar makanan sehat ke endpoint /scan/food
     lalu memverifikasi DB ter-update dengan is_healthy = True,
@@ -28,6 +30,8 @@ def test_e2e_scan_food_healthy(test_client, setup_e2e_data):
         "notes": "E2E Test Food"
     }
 
+    mock_detect.return_value = [{"description": "Tomatoes, raw", "weight_g": 50, "fdcId": 170457}]
+    
     # 2. Tembak Endpoint Analyze
     response = test_client.post("/api/v1/scan/food/analyze", files=files)
     assert response.status_code == 200, response.text
@@ -68,7 +72,8 @@ def test_e2e_scan_food_healthy(test_client, setup_e2e_data):
     pets = client.table("virtual_pets").select("*").eq("id", pet_id).execute()
     assert pets.data[0]["experience_points"] > 50  # 50 adalah nilai awal di conftest
 
-def test_e2e_scan_medicine(test_client, setup_e2e_data):
+@patch("app.api.v1.scan.ai_service.detect_medicine")
+def test_e2e_scan_medicine(mock_detect_meds, test_client, setup_e2e_data):
     """
     Test E2E memindai obat ke endpoint /scan/medicine.
     """
@@ -91,6 +96,8 @@ def test_e2e_scan_medicine(test_client, setup_e2e_data):
         "notes": "E2E Test Meds"
     }
 
+    mock_detect_meds.return_value = "insulin pen"
+    
     response = test_client.post("/api/v1/scan/medicine", data=data, files=files)
     assert response.status_code == 200, response.text
     

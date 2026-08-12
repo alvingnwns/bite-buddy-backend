@@ -9,7 +9,8 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+from app.models.base import CamelModel
 
 
 # ──────────────────────────────────────────────
@@ -141,7 +142,7 @@ def compute_pet_status(happiness: int, hunger: int) -> PetStatus:
 # 1. User
 # ──────────────────────────────────────────────
 
-class UserBase(BaseModel):
+class UserBase(CamelModel):
     email: str = Field(..., max_length=255)
     full_name: str = Field(..., max_length=255)
     role: UserRole = UserRole.child
@@ -158,7 +159,7 @@ class UserCreate(UserBase):
     password_hash: str
 
 
-class UserUpdate(BaseModel):
+class UserUpdate(CamelModel):
     """Model untuk update data user.
 
     Hanya field yang boleh diubah setelah registrasi.
@@ -180,7 +181,7 @@ class User(UserBase):
     model_config = {"from_attributes": True}
 
 
-class UserPublic(BaseModel):
+class UserPublic(CamelModel):
     """Public-facing user model — password hash tidak di-expose."""
     id: UUID
     email: str
@@ -201,7 +202,7 @@ class UserPublic(BaseModel):
 # 2. Clinical Parameters
 # ──────────────────────────────────────────────
 
-class ClinicalParameterBase(BaseModel):
+class ClinicalParameterBase(CamelModel):
     child_id: UUID
     recorded_by: UUID
     height_cm: float = Field(..., ge=20, le=250)
@@ -229,7 +230,7 @@ class ClinicalParameterCreate(ClinicalParameterBase):
     pass
 
 
-class ClinicalParameterUpdate(BaseModel):
+class ClinicalParameterUpdate(CamelModel):
     """Dokter bisa update semua field, termasuk override kalori target."""
     height_cm: Optional[float] = None
     weight_kg: Optional[float] = None
@@ -256,7 +257,7 @@ class ClinicalParameter(ClinicalParameterBase):
 # 3. Custom Meal Schedule
 # ──────────────────────────────────────────────
 
-class CustomMealScheduleBase(BaseModel):
+class CustomMealScheduleBase(CamelModel):
     child_id: UUID
     created_by: UUID
     meal_type: MealType
@@ -277,7 +278,7 @@ class CustomMealScheduleCreate(CustomMealScheduleBase):
     pass
 
 
-class CustomMealScheduleUpdate(BaseModel):
+class CustomMealScheduleUpdate(CamelModel):
     meal_type: Optional[MealType] = None
     day_of_week: Optional[int] = None
     meal_name: Optional[str] = None
@@ -304,7 +305,7 @@ class CustomMealSchedule(CustomMealScheduleBase):
 # 4. Virtual Pet
 # ──────────────────────────────────────────────
 
-class VirtualPetBase(BaseModel):
+class VirtualPetBase(CamelModel):
     child_id: UUID
     pet_name: str = Field(..., max_length=100)
     # pet_type sekarang pakai PetType enum (sebelumnya str bebas)
@@ -318,7 +319,7 @@ class VirtualPetBase(BaseModel):
     is_active: bool = True
 
 
-class VirtualPetCreate(BaseModel):
+class VirtualPetCreate(CamelModel):
     """Saat membuat pet baru, hanya perlu nama dan tipe.
     Nilai happiness & hunger diset default 100/100 oleh sistem.
     Dokter bisa adjust via PATCH /pets/{pet_id} kapan saja.
@@ -328,7 +329,7 @@ class VirtualPetCreate(BaseModel):
     pet_type: PetType = PetType.dog
 
 
-class VirtualPetUpdate(BaseModel):
+class VirtualPetUpdate(CamelModel):
     """Update nama, tipe, atau stats pet.
     Dokter bisa gunakan ini untuk adjust happiness/hunger awal.
     """
@@ -354,7 +355,7 @@ class VirtualPet(VirtualPetBase):
 # 5. Food Log
 # ──────────────────────────────────────────────
 
-class FoodLogBase(BaseModel):
+class FoodLogBase(CamelModel):
     child_id: UUID
     logged_by: UUID
     meal_schedule_id: Optional[UUID] = None
@@ -376,7 +377,7 @@ class FoodLogCreate(FoodLogBase):
     pass
 
 
-class FoodLogUpdate(BaseModel):
+class FoodLogUpdate(CamelModel):
     meal_type: Optional[MealType] = None
     food_name: Optional[str] = None
     portion_size: Optional[str] = None
@@ -397,7 +398,7 @@ class FoodLog(FoodLogBase):
 # 6. Medication Log
 # ──────────────────────────────────────────────
 
-class MedicationLogBase(BaseModel):
+class MedicationLogBase(CamelModel):
     child_id: UUID
     administered_by: UUID
     medication_name: str = Field(..., max_length=255)
@@ -415,7 +416,7 @@ class MedicationLogCreate(MedicationLogBase):
     pass
 
 
-class MedicationLogUpdate(BaseModel):
+class MedicationLogUpdate(CamelModel):
     medication_name: Optional[str] = None
     dosage: Optional[float] = None
     dosage_unit: Optional[str] = None
@@ -438,7 +439,7 @@ class MedicationLog(MedicationLogBase):
 # 7. Alerts (Real-time Sync)
 # ──────────────────────────────────────────────
 
-class AlertBase(BaseModel):
+class AlertBase(CamelModel):
     child_id: UUID
     # type sekarang pakai AlertType enum (sebelumnya str bebas = rawan typo)
     type: AlertType
@@ -450,7 +451,7 @@ class AlertCreate(AlertBase):
     pass
 
 
-class AlertUpdate(BaseModel):
+class AlertUpdate(CamelModel):
     is_read: Optional[bool] = None
 
 
@@ -465,7 +466,7 @@ class AlertRead(AlertBase):
 # 8. Nutrition Database (Placeholder)
 # ──────────────────────────────────────────────
 
-class NutritionItem(BaseModel):
+class NutritionItem(CamelModel):
     """Model untuk tabel nutrition_database.
 
     Data ini digunakan oleh Gemini sebagai ground truth saat
