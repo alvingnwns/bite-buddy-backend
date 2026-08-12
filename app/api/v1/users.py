@@ -18,54 +18,7 @@ from app.models.database import Gender, UserUpdate
 router = APIRouter()
 
 
-@router.get("/me", response_model=Dict[str, Any])
-def get_my_profile(
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Any:
-    """Ambil profil user yang sedang login.
 
-    Menggunakan JWT dari header Authorization untuk identifikasi.
-    Jika user belum ada di public.users (misal: register sebelum fix),
-    maka otomatis di-create dari data JWT.
-    """
-    client = get_supabase_service_client()
-    try:
-        response = (
-            client.table("users")
-            .select("*")
-            .eq("id", current_user["id"])
-            .execute()
-        )
-        if not response.data:
-            # Auto-create: user ada di auth.users tapi belum di public.users
-            email = current_user.get("email", "unknown@example.com")
-            role = current_user.get("user_metadata", {}).get("role", "child")
-            insert_resp = (
-                client.table("users")
-                .insert({
-                    "id": current_user["id"],
-                    "email": email,
-                    "full_name": email.split("@")[0],
-                    "role": role,
-                    "is_active": True,
-                    "password_hash": "supabase_managed"
-                })
-                .execute()
-            )
-            if insert_resp.data:
-                return insert_resp.data[0]
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User tidak ditemukan dan gagal dibuat otomatis"
-            )
-        return response.data[0]
-    except Exception as e:
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
 
 
 @router.get("/{user_id}/children", response_model=List[Dict[str, Any]])

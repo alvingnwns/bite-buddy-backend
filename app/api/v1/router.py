@@ -1,9 +1,10 @@
 from fastapi import APIRouter
 
-from app.api.v1 import health, scan, users, clinical, schedules, pets, logs
+from app.api.v1 import health, scan, users, clinical, schedules, pets, logs, auth
 
 api_v1_router = APIRouter()
 
+api_v1_router.include_router(auth.router, prefix="/auth", tags=["Auth"])
 api_v1_router.include_router(health.router)
 api_v1_router.include_router(scan.router)
 api_v1_router.include_router(users.router, prefix="/users", tags=["Users"])
