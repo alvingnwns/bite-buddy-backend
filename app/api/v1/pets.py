@@ -50,7 +50,16 @@ def get_pet(child_id: UUID) -> Any:
     try:
         response = client.table("virtual_pets").select("*").eq("child_id", str(child_id)).execute()
         if not response.data:
-            raise HTTPException(status_code=404, detail="Peliharaan tidak ditemukan")
+            # Auto-create pet
+            default_pet = {
+                "child_id": str(child_id),
+                "name": "Buddy",
+                "pet_type": "dog"
+            }
+            insert_resp = client.table("virtual_pets").insert(default_pet).execute()
+            if not insert_resp.data:
+                raise HTTPException(status_code=500, detail="Gagal membuat peliharaan otomatis")
+            return insert_resp.data[0]
         return response.data[0]
     except Exception as e:
         if isinstance(e, HTTPException):

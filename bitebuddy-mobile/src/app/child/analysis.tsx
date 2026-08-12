@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, Dimensions } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, Dimensions, TextInput } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
 const { width } = Dimensions.get('window');
@@ -12,15 +12,19 @@ export default function AnalysisResult() {
   const imageUri = (params.imageUri as string) || null;
   const totalWeight = parseInt((params.totalWeight as string) || '0', 10);
   
+  const [editableFoodName, setEditableFoodName] = useState(foodName);
+  
   // Parse real ingredients from API
   let ingredients: any[] = [];
   try {
     ingredients = JSON.parse((params.ingredients as string) || '[]');
   } catch { ingredients = []; }
 
+  const [editableGrams, setEditableGrams] = useState(totalWeight || ingredients.reduce((sum: number, i: any) => sum + (i.weight_g || 0), 0));
+  
   // Calculate nutrition estimates from ingredients weight
   // These are rough estimates - in production the /food/confirm endpoint calculates exact values
-  const totalGrams = totalWeight || ingredients.reduce((sum: number, i: any) => sum + (i.weight_g || 0), 0);
+  const totalGrams = editableGrams;
   const estimatedCalories = Math.round(totalGrams * 1.2); // rough kcal estimate
   const estimatedSugar = Math.round(totalGrams * 0.04 * 10) / 10;
   const estimatedCarbs = Math.round(totalGrams * 0.24 * 100) / 100;
@@ -42,10 +46,16 @@ export default function AnalysisResult() {
 
       {/* Main Card */}
       <View style={styles.cardContainer}>
-        {/* Top Header inside Card */}
+          {/* Top Header inside Card */}
         <View style={styles.cardHeader}>
           <Text style={styles.aiDetectedText}>AI detected</Text>
-          <Text style={styles.foodNameText}>{foodName}</Text>
+          <TextInput 
+            style={styles.foodNameInput} 
+            value={editableFoodName} 
+            onChangeText={setEditableFoodName} 
+            placeholder="Food Name"
+            placeholderTextColor="#999"
+          />
         </View>
         
         <Text style={styles.estSugarTitle}>Estimated Sugar Content</Text>
@@ -72,7 +82,12 @@ export default function AnalysisResult() {
           {/* Portion Box */}
           <View style={styles.portionBox}>
             <Text style={styles.portionTitle}>Portion{'\n'}size</Text>
-            <Text style={styles.portionNumber}>{totalGrams}</Text>
+            <TextInput 
+              style={styles.portionInput} 
+              value={String(editableGrams)} 
+              onChangeText={(text) => setEditableGrams(parseInt(text) || 0)} 
+              keyboardType="numeric"
+            />
             <Text style={styles.portionUnit}>gram</Text>
           </View>
         </View>
@@ -173,6 +188,15 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
   },
+  foodNameInput: {
+    color: 'white',
+    fontSize: 22,
+    fontWeight: '700',
+    textAlign: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.3)',
+    minWidth: 150,
+  },
   estSugarTitle: {
     color: '#F9FDFF',
     fontSize: 11,
@@ -247,6 +271,17 @@ const styles = StyleSheet.create({
     color: '#0C3638',
     fontSize: 36,
     fontWeight: 'bold',
+  },
+  portionInput: {
+    color: '#0C3638',
+    fontSize: 36,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: '#CCC',
+    minWidth: 80,
+    padding: 0,
+    margin: 0,
   },
   portionUnit: {
     color: '#0C3638',

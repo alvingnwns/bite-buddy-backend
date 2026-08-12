@@ -317,6 +317,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     position: 'absolute',
     bottom: 20,
+    zIndex: 20,
   },
   menuItem: {
     width: 88,

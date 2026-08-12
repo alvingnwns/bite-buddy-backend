@@ -48,6 +48,7 @@ def get_my_profile(
                     "full_name": email.split("@")[0],
                     "role": role,
                     "is_active": True,
+                    "password_hash": "supabase_managed"
                 })
                 .execute()
             )

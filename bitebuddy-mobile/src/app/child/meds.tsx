@@ -4,10 +4,12 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../../api/client';
 import { useRouter } from 'expo-router';
+import { useAuth } from '../../context/AuthContext';
 
 const { width } = Dimensions.get('window');
 
 export default function MedsPage() {
+  const { user } = useAuth();
   const [permission, requestPermission] = useCameraPermissions();
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -53,12 +55,17 @@ export default function MedsPage() {
         name: 'meds.jpg',
         type: 'image/jpeg',
       } as any);
+      formData.append('child_id', user.id);
+      formData.append('administered_by', user.id);
+      formData.append('dosage', '1');
+      formData.append('dosage_unit', 'pill');
+      formData.append('route', 'oral');
 
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token || '';
       const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.7:8000/api/v1';
 
-      const response = await fetch(`${API_URL}/scan/medicine/analyze`, {
+      const response = await fetch(`${API_URL}/scan/medicine`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,

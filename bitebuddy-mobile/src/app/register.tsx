@@ -40,6 +40,7 @@ export default function RegisterScreen() {
           full_name: email.split('@')[0], // nama sementara dari email
           role: activeTab,
           is_active: true,
+          password_hash: 'supabase_managed',
         });
 
       if (insertError) {
