@@ -8,6 +8,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.api.errors import api_error
 
 from app.core.config import settings
+from app.core.supabase import get_supabase_service_client
 
 logger = logging.getLogger(__name__)
 
@@ -19,12 +20,13 @@ def decode_jwt(token: str) -> Dict[str, Any]:
     Dekode dan validasi token JWT menggunakan Supabase JWT Secret.
     """
     if not settings.supabase_jwt_secret:
-        logger.warning("SUPABASE_JWT_SECRET tidak diatur! Mendekode token tanpa verifikasi signature (hanya untuk development).")
         try:
-            return jwt.decode(token, options={"verify_signature": False})
-        except Exception as e:
-            logger.error(f"Gagal mendekode token: {e}")
-            raise HTTPException(status_code=401, detail="Invalid token format")
+            response = get_supabase_service_client().auth.get_user(token)
+            if not response.user:
+                raise ValueError("Supabase did not return a user")
+            return {"sub": str(response.user.id)}
+        except Exception:
+            raise api_error(401, "authentication_required", "Authentication is required.")
         
     try:
         # Supabase menggunakan algoritma HS256

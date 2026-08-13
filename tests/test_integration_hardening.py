@@ -4,7 +4,9 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.v1 import children
+from app.core import auth
 from app.services.ai_service import AIService
+from app.services.doctor_ai_service import DOCTOR_SUMMARY_PROVIDER_SCHEMA
 
 
 class Query:
@@ -76,6 +78,29 @@ async def test_ai_without_provider_fails_closed():
 
     assert food_error.value.status_code == 503
     assert medicine_error.value.status_code == 503
+
+
+def test_doctor_ai_provider_schema_avoids_unsupported_legacy_sdk_keywords():
+    schema_text = str(DOCTOR_SUMMARY_PROVIDER_SCHEMA)
+    assert "maxLength" not in schema_text
+    assert "maxItems" not in schema_text
+
+
+def test_missing_jwt_secret_uses_supabase_token_verification(monkeypatch):
+    verified = []
+
+    class Auth:
+        def get_user(self, token):
+            verified.append(token)
+            return SimpleNamespace(user=SimpleNamespace(id="verified-user"))
+
+    monkeypatch.setattr(auth.settings, "supabase_jwt_secret", "")
+    monkeypatch.setattr(
+        auth, "get_supabase_service_client", lambda: SimpleNamespace(auth=Auth()),
+    )
+
+    assert auth.decode_jwt("signed-token") == {"sub": "verified-user"}
+    assert verified == ["signed-token"]
 
 
 @pytest.mark.asyncio
