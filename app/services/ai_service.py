@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 if settings.gemini_api_key:
     genai.configure(api_key=settings.gemini_api_key)
 else:
-    logger.warning("GEMINI_API_KEY tidak ditemukan di .env! Mode Mock/Dummy akan digunakan.")
+    logger.warning("GEMINI_API_KEY tidak ditemukan; AI scan dinonaktifkan sampai provider dikonfigurasi.")
 
 class IngredientEstimate(BaseModel):
     name: str = Field(description="Nama bahan makanan mentah (fundamental raw ingredient) dalam bahasa Inggris. Contoh: 'wheat flour', 'egg', 'tomato', 'chicken breast'")
@@ -43,10 +43,10 @@ class AIService:
             Tuple[bool, List[Dict]]: (is_food, list_of_ingredients)
         """
         if not self.api_key:
-            logger.warning("Menggunakan MOCK untuk deteksi makanan.")
-            return True, [
-                {"description": "Tomatoes, raw", "weight_g": 50, "fdcId": 170457}
-            ]
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="AI provider is not configured.",
+            )
 
         try:
             model = genai.GenerativeModel(self.food_model_name)
@@ -102,8 +102,10 @@ class AIService:
         except Exception as e:
             logger.error(f"Error AI detect_food_ingredients: {e}")
             if "429" in str(e) or "quota" in str(e).lower():
-                logger.warning("Quota exceeded. Falling back to dummy data.")
-                return self._get_dummy_detection()
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="AI provider is temporarily unavailable.",
+                )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Gagal menganalisis gambar dengan AI."
@@ -114,8 +116,10 @@ class AIService:
         Mengirim gambar ke Gemini API untuk mendeteksi tipe obat atau insulin.
         """
         if not self.api_key:
-            logger.warning("Menggunakan MOCK untuk obat.")
-            return {"is_medicine": True, "detected": "Insulin Pen (Mock)"}
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="AI provider is not configured.",
+            )
 
         try:
             model = genai.GenerativeModel(self.medicine_model_name)

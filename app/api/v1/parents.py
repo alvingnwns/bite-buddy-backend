@@ -147,6 +147,7 @@ def get_child_history_detail(child_id: str, history_id: str, identity: dict[str,
 def get_child_notifications(child_id: str, limit: int = Query(20, ge=1, le=100), cursor: str | None = None, identity: dict[str, Any] = Depends(require_parent)) -> dict[str, Any]:
     assert_parent_child(identity["id"], child_id)
     query = get_supabase_service_client().table("alerts").select("*").eq("child_id", child_id)
+    query = query.or_(f"recipient_user_id.is.null,recipient_user_id.eq.{identity['id']}")
     if cursor: query = query.lt("created_at", cursor)
     rows = query.order("created_at", desc=True).limit(limit + 1).execute().data or []
     has_more = len(rows) > limit

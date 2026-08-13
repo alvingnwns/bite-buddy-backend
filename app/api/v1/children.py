@@ -3,9 +3,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from typing import Any
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
 from app.api.deps import require_child
 from app.api.errors import api_error
@@ -13,8 +12,7 @@ from app.core.supabase import get_supabase_service_client
 from app.models.base import CamelModel
 from app.services.activity_service import record_activity
 from app.services.ai_service import AIService
-from app.services.gamification_service import GamificationService
-from app.services.integration_service import canonical_pet, complete_matching_schedule, dashboard, notification, schedules, streak_days
+from app.services.integration_service import canonical_pet, dashboard, notification, schedules, streak_days
 from app.services.reasoning_service import ReasoningService
 from app.services.storage_service import StorageService
 
@@ -22,7 +20,6 @@ router = APIRouter()
 storage_service = StorageService()
 ai_service = AIService()
 reasoning_service = ReasoningService()
-gamification_service = GamificationService()
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 
@@ -120,6 +117,8 @@ async def analyze_food(file: UploadFile = File(...), identity: dict[str, Any] = 
             storage_service.upload_image(file_bytes=data, filename=file.filename or "food.jpg", bucket_name="food-photos"),
             ai_service.detect_food_ingredients(image_bytes=data, mime_type=file.content_type or "image/jpeg"),
         )
+    except HTTPException:
+        raise
     except Exception:
         raise api_error(502, "analysis_failed", "The food image could not be analyzed.")
     is_food, ingredients = detection
@@ -192,18 +191,19 @@ async def confirm_food(analysis_id: str, req: ConfirmFoodRequest, identity: dict
     scale = req.portion_grams / base_portion
     nutrition = {key: round(float(value or 0) * scale, 2) for key, value in base.items()}
     is_healthy = float(nutrition.get("sugar_g", 0)) < 15
-    affected = complete_matching_schedule(identity["id"], "meal")
-    inserted = client.table("food_logs").insert({
-        "child_id": identity["id"], "logged_by": identity["id"], "meal_type": "snack",
-        "meal_schedule_id": affected["id"] if affected else None, "food_name": payload.get("foodName", "Food"),
-        "portion_size": f"{req.portion_grams:g} g", "portion_grams": req.portion_grams,
-        "calories": round(float(nutrition.get("kcal", 0))), "photo_url": draft["image_url"],
-        "nutrition": nutrition, "is_healthy": is_healthy, "analysis_id": analysis_id,
-    }).execute().data[0]
-    gamification_service.evaluate_food_compliance(UUID(identity["id"]), float(nutrition.get("kcal", 0)), is_healthy)
-    client.table("analysis_drafts").update({"status": "confirmed", "confirmed_history_id": inserted["id"], "confirmed_at": datetime.now(timezone.utc).isoformat()}).eq("id", analysis_id).execute()
-    record_activity(actor_id=identity["id"], actor_role="child", action="food.confirm", target_type="food_log", target_id=str(inserted["id"]), child_id=identity["id"], description="Confirmed food analysis.")
-    return _confirmation(_food_history(inserted), identity["id"], affected)
+    try:
+        result = client.rpc("confirm_child_analysis", {
+            "p_child_id": identity["id"], "p_analysis_id": analysis_id,
+            "p_analysis_type": "food", "p_portion_grams": req.portion_grams,
+            "p_nutrition": nutrition, "p_is_healthy": is_healthy,
+        }).execute().data
+    except Exception as exc:
+        message = str(exc)
+        if "analysis_forbidden" in message: raise api_error(403, "forbidden", "This operation is not permitted.")
+        if "analysis_not_found" in message: raise api_error(404, "analysis_not_found", "Food analysis was not found.")
+        raise api_error(500, "confirmation_failed", "Food confirmation could not be completed.")
+    result["history"] = _food_history(result["history"])
+    return result
 
 
 @router.post("/me/medicine-analyses", status_code=201)
@@ -214,6 +214,8 @@ async def analyze_medicine(file: UploadFile = File(...), identity: dict[str, Any
             storage_service.upload_image(file_bytes=data, filename=file.filename or "medicine.jpg", bucket_name="medicine-photos"),
             ai_service.detect_medicine(image_bytes=data, mime_type=file.content_type or "image/jpeg"),
         )
+    except HTTPException:
+        raise
     except Exception:
         raise api_error(502, "analysis_failed", "The medicine image could not be analyzed.")
     is_medicine = bool(detected.get("is_medicine", False)) if isinstance(detected, dict) else False
@@ -239,20 +241,20 @@ def confirm_medicine(analysis_id: str, identity: dict[str, Any] = Depends(requir
     if str(draft["child_id"]) != identity["id"]: raise api_error(403, "forbidden", "This operation is not permitted.")
     if not (draft.get("payload") or {}).get("isMedicine"):
         raise api_error(409, "invalid_medicine", "This analysis cannot be confirmed as medicine.")
-    existing = client.table("medication_logs").select("*").eq("analysis_id", analysis_id).execute().data or []
-    if existing: return _confirmation(_medicine_history(existing[0]), identity["id"], None)
-    detected = (draft.get("payload") or {}).get("detected") or {}
-    name = detected.get("detected", "Medicine") if isinstance(detected, dict) else "Medicine"
-    affected = complete_matching_schedule(identity["id"], "medicine")
-    inserted = client.table("medication_logs").insert({
-        "child_id": identity["id"], "administered_by": identity["id"], "medication_name": str(name),
-        "dosage": 1, "dosage_unit": "unit", "route": "oral", "scheduled_time": datetime.now(timezone.utc).time().isoformat(),
-        "was_taken": True, "analysis_id": analysis_id, "photo_url": draft["image_url"], "is_medicine": True, "status": "done",
-    }).execute().data[0]
-    gamification_service.evaluate_medicine_compliance(UUID(identity["id"]))
-    client.table("analysis_drafts").update({"status": "confirmed", "confirmed_history_id": inserted["id"], "confirmed_at": datetime.now(timezone.utc).isoformat()}).eq("id", analysis_id).execute()
-    record_activity(actor_id=identity["id"], actor_role="child", action="medicine.confirm", target_type="medication_log", target_id=str(inserted["id"]), child_id=identity["id"], description="Confirmed medicine analysis.")
-    return _confirmation(_medicine_history(inserted), identity["id"], affected)
+    try:
+        result = client.rpc("confirm_child_analysis", {
+            "p_child_id": identity["id"], "p_analysis_id": analysis_id,
+            "p_analysis_type": "medicine", "p_portion_grams": None,
+            "p_nutrition": {}, "p_is_healthy": True,
+        }).execute().data
+    except Exception as exc:
+        message = str(exc)
+        if "analysis_forbidden" in message: raise api_error(403, "forbidden", "This operation is not permitted.")
+        if "analysis_not_found" in message: raise api_error(404, "analysis_not_found", "Medicine analysis was not found.")
+        if "invalid_medicine" in message: raise api_error(409, "invalid_medicine", "This analysis cannot be confirmed as medicine.")
+        raise api_error(500, "confirmation_failed", "Medicine confirmation could not be completed.")
+    result["history"] = _medicine_history(result["history"])
+    return result
 
 
 def history_list(child_id: str, history_type: str, limit: int, cursor: str | None) -> dict[str, Any]:
@@ -299,6 +301,7 @@ def get_history_detail(history_id: str, identity: dict[str, Any] = Depends(requi
 @router.get("/me/notifications")
 def get_notifications(limit: int = Query(20, ge=1, le=100), cursor: str | None = None, identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
     query = get_supabase_service_client().table("alerts").select("*").eq("child_id", identity["id"])
+    query = query.or_(f"recipient_user_id.is.null,recipient_user_id.eq.{identity['id']}")
     if cursor: query = query.lt("created_at", cursor)
     rows = query.order("created_at", desc=True).limit(limit + 1).execute().data or []
     has_more = len(rows) > limit
@@ -308,7 +311,9 @@ def get_notifications(limit: int = Query(20, ge=1, le=100), cursor: str | None =
 
 @router.patch("/me/notifications/{notification_id}/read")
 def mark_notification_read(notification_id: str, identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
-    rows = get_supabase_service_client().table("alerts").update({"is_read": True}).eq("id", notification_id).eq("child_id", identity["id"]).execute().data or []
+    rows = (get_supabase_service_client().table("alerts").update({"is_read": True})
+            .eq("id", notification_id).eq("child_id", identity["id"])
+            .or_(f"recipient_user_id.is.null,recipient_user_id.eq.{identity['id']}").execute().data or [])
     if not rows: raise api_error(404, "notification_not_found", "Notification was not found.")
     record_activity(actor_id=identity["id"], actor_role="child", action="notification.read", target_type="notification", target_id=notification_id, child_id=identity["id"], description="Marked notification as read.")
     return notification(rows[0])
