@@ -8,3 +8,12 @@ def test_db_check(test_client):
     data = response.json()
     assert data["status"] in ["success", "ok"]
     assert "user_count" in data.get("data", data)
+import os
+
+import pytest
+
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("RUN_EXTERNAL_E2E") != "1",
+    reason="External Supabase E2E is opt-in.",
+)

@@ -29,8 +29,8 @@ class ReasoningService:
 
     def calculate_totals(self, confirmed_ingredients: List[Dict[str, Any]]) -> Dict[str, float]:
         """
-        Menghitung total nutrisi berdasarkan list ingredients yang sudah dikonfirmasi
-        dan diedit beratnya (gram) oleh user.
+        Menghitung total nutrisi berdasarkan list ingredients yang sudah dikonfirmasi.
+        Sesuai flow: Hitung berdasarkan data dari FoodData (berat * makro/100g).
         """
         return self.food_data_service.calculate_nutrition_for_meal(confirmed_ingredients)
 

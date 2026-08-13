@@ -22,9 +22,8 @@ from supabase import Client, create_client
 from app.core.config import settings
 
 
-@lru_cache
 def get_supabase_client() -> Client:
-    """Membuat dan meng-cache Supabase client instance (anon key).
+    """Membuat Supabase client instance (anon key).
 
     Raises:
         ValueError: Jika SUPABASE_URL atau SUPABASE_ANON_KEY belum diisi di .env
@@ -39,9 +38,8 @@ def get_supabase_client() -> Client:
     )
 
 
-@lru_cache
 def get_supabase_service_client() -> Client:
-    """Membuat dan meng-cache Supabase service role client.
+    """Membuat Supabase service role client.
 
     Hanya digunakan untuk operasi backend-to-backend (bypass RLS).
     Jangan pernah expose service_role_key ke client-side.

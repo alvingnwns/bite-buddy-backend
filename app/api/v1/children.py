@@ -1,369 +1,314 @@
-from typing import Any, Dict, List, Optional
-import uuid
+from __future__ import annotations
+
 import asyncio
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
+from typing import Any
+from uuid import UUID
 
-from app.core.auth import get_current_user
+from fastapi import APIRouter, Depends, File, Query, UploadFile
+
+from app.api.deps import require_child
+from app.api.errors import api_error
 from app.core.supabase import get_supabase_service_client
 from app.models.base import CamelModel
-from app.models.database import Gender, MealType
-
+from app.services.activity_service import record_activity
 from app.services.ai_service import AIService
-from app.services.reasoning_service import ReasoningService
 from app.services.gamification_service import GamificationService
-from app.services.log_service import LogService
+from app.services.integration_service import canonical_pet, complete_matching_schedule, dashboard, notification, schedules, streak_days
+from app.services.reasoning_service import ReasoningService
 from app.services.storage_service import StorageService
 
 router = APIRouter()
-
 storage_service = StorageService()
 ai_service = AIService()
 reasoning_service = ReasoningService()
 gamification_service = GamificationService()
-log_service = LogService()
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 
-# In-memory drafts for MVP (No DB schema change required)
-food_drafts = {}
-med_drafts = {}
 
 class ProfileUpdate(CamelModel):
-    username: Optional[str] = None
-    height_cm: Optional[float] = None
-    weight_kg: Optional[float] = None
-    allergies: Optional[str] = None
+    username: str | None = None
+    height_cm: float | None = None
+    weight_kg: float | None = None
+    allergies: str | None = None
 
-class ConfirmFoodReq(CamelModel):
+
+class ConfirmFoodRequest(CamelModel):
     portion_grams: float
 
-@router.get("/me/profile")
-def get_child_profile(current_user: Dict[str, Any] = Depends(get_current_user)) -> Any:
+
+def _profile(child_id: str) -> dict[str, Any]:
     client = get_supabase_service_client()
-    child_id = current_user["id"]
-    
-    # Get user profile
-    user_resp = client.table("users").select("*").eq("id", child_id).single().execute()
-    if not user_resp.data:
-        raise HTTPException(status_code=404, detail="Child profile not found")
-        
-    user = user_resp.data
-    
-    # Get clinical parameters
-    clinical_resp = client.table("clinical_parameters").select("*").eq("child_id", child_id).order("created_at", desc=True).limit(1).execute()
-    clinical = clinical_resp.data[0] if clinical_resp.data else {}
-    
-    # Get doctor name if applicable
+    response = client.table("users").select("*").eq("id", child_id).single().execute()
+    if not response.data:
+        raise api_error(404, "profile_not_found", "Child profile was not found.")
+    user = response.data
+    clinical_rows = client.table("clinical_parameters").select("*").eq("child_id", child_id).order("created_at", desc=True).limit(1).execute().data or []
+    clinical = clinical_rows[0] if clinical_rows else {}
     doctor_name = None
     if user.get("doctor_id"):
-        doc_resp = client.table("users").select("full_name").eq("id", user["doctor_id"]).execute()
-        if doc_resp.data:
-            doctor_name = doc_resp.data[0].get("full_name")
-            
-    # Asumsi patient_code disimpan atau dimapping dari suatu field (sementara return dummy jika tidak ada)
-    patient_code = user.get("patient_code", "UNKNOWN")
-    
+        doctors = client.table("users").select("full_name").eq("id", user["doctor_id"]).execute().data or []
+        doctor_name = doctors[0].get("full_name") if doctors else None
+    allergies = clinical.get("allergies") or []
     return {
-        "childId": child_id,
-        "patientCode": patient_code,
-        "username": user.get("full_name"), # We mapped username to full_name in auth
-        "doctorName": doctor_name,
-        "fullName": user.get("full_name"),
-        "birthdate": user.get("birth_date"),
-        "gender": user.get("gender"),
-        "heightCm": clinical.get("height_cm"),
-        "weightKg": clinical.get("weight_kg"),
-        "allergies": clinical.get("allergies", [])[0] if clinical.get("allergies") else None,
+        "childId": child_id, "patientCode": user.get("patient_code"),
+        "username": user.get("username") or str(user.get("email", "")).split("@")[0],
+        "doctorName": doctor_name, "fullName": user.get("full_name"),
+        "birthdate": user.get("birth_date"), "gender": user.get("gender"),
+        "heightCm": clinical.get("height_cm"), "weightKg": clinical.get("weight_kg"),
+        "allergies": allergies[0] if isinstance(allergies, list) and allergies else "",
     }
 
+
+@router.get("/me/profile")
+def get_child_profile(identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
+    return _profile(identity["id"])
+
+
 @router.patch("/me/profile")
-def update_child_profile(req: ProfileUpdate, current_user: Dict[str, Any] = Depends(get_current_user)) -> Any:
+def update_child_profile(req: ProfileUpdate, identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
     client = get_supabase_service_client()
-    child_id = current_user["id"]
-    
-    # Update users table if username is provided
+    child_id = identity["id"]
     if req.username is not None:
-        client.table("users").update({"full_name": req.username}).eq("id", child_id).execute()
-        
-    # Update clinical parameters
-    clinical_data = {}
-    if req.height_cm is not None:
-        clinical_data["height_cm"] = req.height_cm
-    if req.weight_kg is not None:
-        clinical_data["weight_kg"] = req.weight_kg
-    if req.allergies is not None:
-        clinical_data["allergies"] = [req.allergies]
-        
+        username = req.username.strip()
+        duplicate = client.table("users").select("id").ilike("username", username).neq("id", child_id).execute()
+        if duplicate.data:
+            raise api_error(409, "username_conflict", "Username is already in use.", {"fields": {"username": ["Already in use."]}})
+        client.table("users").update({"username": username, "email": f"{username}@bitebuddy.com"}).eq("id", child_id).execute()
+    clinical_data: dict[str, Any] = {}
+    if req.height_cm is not None: clinical_data["height_cm"] = req.height_cm
+    if req.weight_kg is not None: clinical_data["weight_kg"] = req.weight_kg
+    if req.allergies is not None: clinical_data["allergies"] = [req.allergies] if req.allergies else []
     if clinical_data:
-        # Check if clinical param exists
         existing = client.table("clinical_parameters").select("id").eq("child_id", child_id).order("created_at", desc=True).limit(1).execute()
         if existing.data:
             client.table("clinical_parameters").update(clinical_data).eq("id", existing.data[0]["id"]).execute()
         else:
-            clinical_data["child_id"] = child_id
-            clinical_data["recorded_by"] = child_id
+            clinical_data.update({"child_id": child_id, "recorded_by": child_id, "height_cm": req.height_cm or 1, "weight_kg": req.weight_kg or 1})
             client.table("clinical_parameters").insert(clinical_data).execute()
-            
-    return get_child_profile(current_user)
+    record_activity(actor_id=child_id, actor_role="child", action="profile.update", target_type="user", target_id=child_id, child_id=child_id, description="Updated profile.")
+    return _profile(child_id)
+
 
 @router.get("/me/dashboard")
-def get_child_dashboard(current_user: Dict[str, Any] = Depends(get_current_user)) -> Any:
-    client = get_supabase_service_client()
-    child_id = current_user["id"]
-    
-    pet_resp = client.table("virtual_pets").select("*").eq("child_id", child_id).single().execute()
-    pet = pet_resp.data if pet_resp.data else {"level": 1, "happiness": 100, "hunger": 100, "experience_points": 0}
-    
-    # Calculate HP and XP as ratio 0-1
-    # Assuming max HP is based on level, here we just do a simple mapping for MVP
-    hp_ratio = (pet.get("happiness", 100) + pet.get("hunger", 100)) / 200.0
-    xp_ratio = (pet.get("experience_points", 0) % 100) / 100.0 # Just a dummy calculation
-    
-    # Get streak (dummy for MVP)
-    streak_days = 0
-    
-    return {
-        "childId": child_id,
-        "pet": {
-            "level": pet.get("level", 1),
-            "hp": hp_ratio,
-            "xp": xp_ratio
-        },
-        "streakDays": streak_days,
-        "asOf": datetime.now(timezone.utc).isoformat()
-    }
+def get_child_dashboard(identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
+    return dashboard(identity["id"])
 
-@router.post("/me/food-analyses")
-async def analyze_food(
-    file: UploadFile = File(...),
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Any:
-    file_bytes = await file.read()
-    try:
-        upload_task = storage_service.upload_image(file_bytes=file_bytes, filename=file.filename, bucket_name="food-photos")
-        ai_task = ai_service.detect_food_ingredients(image_bytes=file_bytes, mime_type=file.content_type or "image/jpeg")
-        public_url, detected_ingredients = await asyncio.gather(upload_task, ai_task)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-        
-    analysis_id = str(uuid.uuid4())
-    food_name = detected_ingredients[0].get("ingredient", "Unknown Food") if detected_ingredients else "Unknown Food"
-    
-    # Store draft in memory
-    food_drafts[analysis_id] = {
-        "child_id": current_user["id"],
-        "ingredients": detected_ingredients,
-        "public_url": public_url,
-        "food_name": food_name
-    }
-    
-    # Return draft shape as required by frontend
-    return {
-        "analysisId": analysis_id,
-        "foodName": food_name,
-        "sugarAmountGrams": 0,
-        "sugarCategory": "unknown",
-        "portionGrams": 100,
-        "caloriesKcal": 0,
-        "carbohydratesGrams": 0,
-        "fiberGrams": 0,
-        "proteinGrams": 0,
-        "fatGrams": 0,
-        "imageUrl": public_url,
-        "status": "draft"
-    }
-
-@router.post("/me/food-analyses/{analysis_id}/confirm")
-async def confirm_food(
-    analysis_id: str,
-    req: ConfirmFoodReq,
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Any:
-    if analysis_id not in food_drafts:
-        raise HTTPException(status_code=404, detail="Draft not found or expired")
-        
-    draft = food_drafts[analysis_id]
-    if str(draft["child_id"]) != str(current_user["id"]):
-        raise HTTPException(status_code=403, detail="Unauthorized to confirm this draft")
-        
-    # Scale ingredients by portion (MVP: just pass it down)
-    nutrition_data = await reasoning_service.process_confirmed_meal(draft["ingredients"])
-    
-    db_record = log_service.create_food_log(
-        child_id=current_user["id"],
-        logged_by=current_user["id"],
-        meal_type=MealType.snack, # MVP default
-        nutrition_data=nutrition_data,
-        public_url=draft["public_url"],
-        notes=None
-    )
-    
-    total_calories = int(nutrition_data["total_calories"])
-    is_healthy = nutrition_data.get("is_healthy", True)
-    gamification_service.evaluate_food_compliance(child_id=current_user["id"], total_calories=total_calories, is_healthy=is_healthy)
-    
-    del food_drafts[analysis_id]
-    
-    return {
-        "history": {
-            "id": str(db_record["id"]),
-            "childId": str(db_record["child_id"]),
-            "type": "food",
-            "submittedAt": db_record["created_at"],
-            "imageUrl": draft["public_url"],
-            "status": "done",
-            "foodName": draft["food_name"],
-            "analysisId": analysis_id,
-            "healthClassification": "healthy" if is_healthy else "unhealthy"
-        },
-        "pet": {"level": 1, "hp": 1.0, "xp": 0.5},
-        "affectedSchedule": {"id": "dummy-sch", "status": "done"},
-        "streakDays": 1
-    }
-
-@router.post("/me/medicine-analyses")
-async def analyze_medicine(
-    file: UploadFile = File(...),
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Any:
-    file_bytes = await file.read()
-    try:
-        upload_task = storage_service.upload_image(file_bytes=file_bytes, filename=file.filename, bucket_name="medicine-photos")
-        ai_task = ai_service.detect_medicine(image_bytes=file_bytes, mime_type=file.content_type or "image/jpeg")
-        public_url, detected = await asyncio.gather(upload_task, ai_task)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-        
-    analysis_id = str(uuid.uuid4())
-    is_medicine = detected.get("is_medicine", False) if isinstance(detected, dict) else True
-    
-    med_drafts[analysis_id] = {
-        "child_id": current_user["id"],
-        "detected": detected,
-        "public_url": public_url,
-        "is_medicine": is_medicine
-    }
-    
-    return {
-        "analysisId": analysis_id,
-        "isMedicine": is_medicine,
-        "imageUrl": public_url,
-        "status": "awaiting_confirmation" if is_medicine else "failed"
-    }
-
-@router.post("/me/medicine-analyses/{analysis_id}/confirm")
-async def confirm_medicine(
-    analysis_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Any:
-    if analysis_id not in med_drafts:
-        raise HTTPException(status_code=404, detail="Draft not found or expired")
-        
-    draft = med_drafts[analysis_id]
-    if str(draft["child_id"]) != str(current_user["id"]):
-        raise HTTPException(status_code=403, detail="Unauthorized")
-        
-    db_record = log_service.create_medication_log(
-        child_id=current_user["id"],
-        administered_by=current_user["id"],
-        detected_medicine=str(draft["detected"]),
-        dosage=1.0, # dummy default
-        dosage_unit="unit",
-        route="oral",
-        public_url=draft["public_url"],
-        notes=None
-    )
-    
-    gamification_service.evaluate_medicine_compliance(child_id=current_user["id"])
-    del med_drafts[analysis_id]
-    
-    return {
-        "history": {
-            "id": str(db_record["id"]),
-            "childId": str(db_record["child_id"]),
-            "type": "medicine",
-            "submittedAt": db_record["created_at"],
-            "imageUrl": draft["public_url"],
-            "status": "done",
-            "isMedicine": draft["is_medicine"],
-            "analysisId": analysis_id
-        },
-        "pet": {"level": 1, "hp": 1.0, "xp": 0.5},
-        "affectedSchedule": {"id": "dummy-sch", "status": "done"},
-        "streakDays": 1
-    }
-
-@router.get("/me/history")
-def get_history(
-    type: str = Query("food"),
-    limit: int = Query(20),
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Any:
-    client = get_supabase_service_client()
-    child_id = current_user["id"]
-    
-    items = []
-    if type == "food":
-        resp = client.table("food_logs").select("*").eq("child_id", child_id).order("created_at", desc=True).limit(limit).execute()
-        for log in resp.data:
-            items.append({
-                "id": log["id"],
-                "childId": log["child_id"],
-                "type": "food",
-                "submittedAt": log["created_at"],
-                "imageUrl": log.get("photo_url"),
-                "status": "done",
-                "foodName": log.get("food_name"),
-                "analysisId": "dummy-analysis-id",
-                "healthClassification": "healthy" if log.get("is_healthy") else "unhealthy"
-            })
-    else:
-        resp = client.table("medication_logs").select("*").eq("child_id", child_id).order("created_at", desc=True).limit(limit).execute()
-        for log in resp.data:
-            items.append({
-                "id": log["id"],
-                "childId": log["child_id"],
-                "type": "medicine",
-                "submittedAt": log["created_at"],
-                "imageUrl": log.get("photo_url"),
-                "status": "done",
-                "isMedicine": True,
-                "analysisId": "dummy-analysis-id"
-            })
-            
-    return {"items": items, "nextCursor": None}
 
 @router.get("/me/schedules")
-def get_schedules(
-    date: str = Query(None),
-    timezone: str = Query("Asia/Jakarta"),
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Any:
-    # Dummy MVP schedule
+def get_child_schedules(identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
+    return schedules(identity["id"])
+
+
+async def _image_bytes(file: UploadFile) -> bytes:
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise api_error(415, "unsupported_media_type", "Only JPEG, PNG, and WebP images are supported.")
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise api_error(413, "upload_too_large", "Image size must not exceed 8 MB.")
+    if not data:
+        raise api_error(400, "empty_upload", "The uploaded image is empty.")
+    return data
+
+
+@router.post("/me/food-analyses", status_code=201)
+async def analyze_food(file: UploadFile = File(...), identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
+    data = await _image_bytes(file)
+    try:
+        public_url, detection = await asyncio.gather(
+            storage_service.upload_image(file_bytes=data, filename=file.filename or "food.jpg", bucket_name="food-photos"),
+            ai_service.detect_food_ingredients(image_bytes=data, mime_type=file.content_type or "image/jpeg"),
+        )
+    except Exception:
+        raise api_error(502, "analysis_failed", "The food image could not be analyzed.")
+    is_food, ingredients = detection
+    if not is_food:
+        raise api_error(400, "food_not_detected", "No food was detected in the image.")
+    totals = reasoning_service.calculate_totals(ingredients)
+    portion = sum(float(item.get("weight_g", 0) or 0) for item in ingredients) or 100
+    food_name = ", ".join(str(item.get("description") or item.get("ingredient") or "Food") for item in ingredients)
+    payload = {"ingredients": ingredients, "foodName": food_name, "portionGrams": portion, "nutrition": totals}
+    inserted = get_supabase_service_client().table("analysis_drafts").insert({
+        "child_id": identity["id"], "analysis_type": "food", "payload": payload,
+        "image_url": public_url, "status": "draft",
+    }).execute().data[0]
+    return _food_draft(inserted)
+
+
+def _food_draft(row: dict[str, Any]) -> dict[str, Any]:
+    payload = row.get("payload") or {}
+    nutrition = payload.get("nutrition") or {}
+    sugar = float(nutrition.get("sugar_g", 0) or 0)
     return {
-        "date": date or datetime.now().strftime("%Y-%m-%d"),
-        "timezone": timezone,
-        "items": []
+        "analysisId": str(row["id"]), "isFood": True, "foodName": payload.get("foodName", "Food"),
+        "sugarAmountGrams": sugar, "sugarCategory": "low" if sugar < 5 else "medium" if sugar < 15 else "high",
+        "portionGrams": payload.get("portionGrams", 100), "caloriesKcal": nutrition.get("kcal", 0),
+        "carbohydratesGrams": nutrition.get("carbs_g", 0), "fiberGrams": nutrition.get("fiber_g", 0),
+        "proteinGrams": nutrition.get("protein_g", 0), "fatGrams": nutrition.get("fat_g", 0),
+        "imageUrl": row["image_url"], "status": row["status"],
     }
+
+
+def _food_history(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]), "childId": str(row["child_id"]), "type": "food",
+        "submittedAt": row.get("consumed_at") or row.get("created_at"), "imageUrl": row.get("photo_url"),
+        "status": "done", "foodName": row.get("food_name"),
+        "analysisId": str(row["analysis_id"]) if row.get("analysis_id") else None,
+        "healthClassification": "healthy" if row.get("is_healthy") else "unhealthy",
+    }
+
+
+def _medicine_history(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]), "childId": str(row["child_id"]), "type": "medicine",
+        "submittedAt": row.get("administered_at") or row.get("created_at"), "imageUrl": row.get("photo_url"),
+        "status": row.get("status", "done"), "isMedicine": bool(row.get("is_medicine", True)),
+        "analysisId": str(row["analysis_id"]) if row.get("analysis_id") else None,
+    }
+
+
+def _confirmation(history: dict[str, Any], child_id: str, affected: dict[str, Any] | None) -> dict[str, Any]:
+    return {"history": history, "pet": canonical_pet(child_id), "affectedSchedule": affected, "streakDays": streak_days(child_id)}
+
+
+@router.post("/me/food-analyses/{analysis_id}/confirm")
+async def confirm_food(analysis_id: str, req: ConfirmFoodRequest, identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
+    if req.portion_grams <= 0:
+        raise api_error(422, "validation_error", "One or more fields are invalid.", {"fields": {"portionGrams": ["Must be greater than zero."]}})
+    client = get_supabase_service_client()
+    rows = client.table("analysis_drafts").select("*").eq("id", analysis_id).eq("analysis_type", "food").execute().data or []
+    if not rows: raise api_error(404, "analysis_not_found", "Food analysis was not found.")
+    draft = rows[0]
+    if str(draft["child_id"]) != identity["id"]: raise api_error(403, "forbidden", "This operation is not permitted.")
+    if draft["status"] == "confirmed":
+        logs = client.table("food_logs").select("*").eq("analysis_id", analysis_id).execute().data or []
+        if logs: return _confirmation(_food_history(logs[0]), identity["id"], None)
+        raise api_error(409, "already_confirmed", "Food analysis was already confirmed.")
+    payload = draft.get("payload") or {}
+    base_portion = float(payload.get("portionGrams", 100) or 100)
+    base = payload.get("nutrition") or {}
+    scale = req.portion_grams / base_portion
+    nutrition = {key: round(float(value or 0) * scale, 2) for key, value in base.items()}
+    is_healthy = float(nutrition.get("sugar_g", 0)) < 15
+    affected = complete_matching_schedule(identity["id"], "meal")
+    inserted = client.table("food_logs").insert({
+        "child_id": identity["id"], "logged_by": identity["id"], "meal_type": "snack",
+        "meal_schedule_id": affected["id"] if affected else None, "food_name": payload.get("foodName", "Food"),
+        "portion_size": f"{req.portion_grams:g} g", "portion_grams": req.portion_grams,
+        "calories": round(float(nutrition.get("kcal", 0))), "photo_url": draft["image_url"],
+        "nutrition": nutrition, "is_healthy": is_healthy, "analysis_id": analysis_id,
+    }).execute().data[0]
+    gamification_service.evaluate_food_compliance(UUID(identity["id"]), float(nutrition.get("kcal", 0)), is_healthy)
+    client.table("analysis_drafts").update({"status": "confirmed", "confirmed_history_id": inserted["id"], "confirmed_at": datetime.now(timezone.utc).isoformat()}).eq("id", analysis_id).execute()
+    record_activity(actor_id=identity["id"], actor_role="child", action="food.confirm", target_type="food_log", target_id=str(inserted["id"]), child_id=identity["id"], description="Confirmed food analysis.")
+    return _confirmation(_food_history(inserted), identity["id"], affected)
+
+
+@router.post("/me/medicine-analyses", status_code=201)
+async def analyze_medicine(file: UploadFile = File(...), identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
+    data = await _image_bytes(file)
+    try:
+        public_url, detected = await asyncio.gather(
+            storage_service.upload_image(file_bytes=data, filename=file.filename or "medicine.jpg", bucket_name="medicine-photos"),
+            ai_service.detect_medicine(image_bytes=data, mime_type=file.content_type or "image/jpeg"),
+        )
+    except Exception:
+        raise api_error(502, "analysis_failed", "The medicine image could not be analyzed.")
+    is_medicine = bool(detected.get("is_medicine", False)) if isinstance(detected, dict) else False
+    inserted = get_supabase_service_client().table("analysis_drafts").insert({
+        "child_id": identity["id"], "analysis_type": "medicine", "payload": {"detected": detected, "isMedicine": is_medicine},
+        "image_url": public_url, "status": "awaiting_confirmation" if is_medicine else "failed",
+    }).execute().data[0]
+    if not is_medicine:
+        get_supabase_service_client().table("medication_logs").insert({
+            "child_id": identity["id"], "administered_by": identity["id"], "medication_name": "Not medicine",
+            "dosage": 0, "dosage_unit": "unit", "route": "oral", "scheduled_time": datetime.now(timezone.utc).time().isoformat(),
+            "was_taken": False, "analysis_id": inserted["id"], "photo_url": public_url, "is_medicine": False, "status": "failed",
+        }).execute()
+    return {"analysisId": str(inserted["id"]), "isMedicine": is_medicine, "imageUrl": public_url, "status": inserted["status"]}
+
+
+@router.post("/me/medicine-analyses/{analysis_id}/confirm")
+def confirm_medicine(analysis_id: str, identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
+    client = get_supabase_service_client()
+    rows = client.table("analysis_drafts").select("*").eq("id", analysis_id).eq("analysis_type", "medicine").execute().data or []
+    if not rows: raise api_error(404, "analysis_not_found", "Medicine analysis was not found.")
+    draft = rows[0]
+    if str(draft["child_id"]) != identity["id"]: raise api_error(403, "forbidden", "This operation is not permitted.")
+    if not (draft.get("payload") or {}).get("isMedicine"):
+        raise api_error(409, "invalid_medicine", "This analysis cannot be confirmed as medicine.")
+    existing = client.table("medication_logs").select("*").eq("analysis_id", analysis_id).execute().data or []
+    if existing: return _confirmation(_medicine_history(existing[0]), identity["id"], None)
+    detected = (draft.get("payload") or {}).get("detected") or {}
+    name = detected.get("detected", "Medicine") if isinstance(detected, dict) else "Medicine"
+    affected = complete_matching_schedule(identity["id"], "medicine")
+    inserted = client.table("medication_logs").insert({
+        "child_id": identity["id"], "administered_by": identity["id"], "medication_name": str(name),
+        "dosage": 1, "dosage_unit": "unit", "route": "oral", "scheduled_time": datetime.now(timezone.utc).time().isoformat(),
+        "was_taken": True, "analysis_id": analysis_id, "photo_url": draft["image_url"], "is_medicine": True, "status": "done",
+    }).execute().data[0]
+    gamification_service.evaluate_medicine_compliance(UUID(identity["id"]))
+    client.table("analysis_drafts").update({"status": "confirmed", "confirmed_history_id": inserted["id"], "confirmed_at": datetime.now(timezone.utc).isoformat()}).eq("id", analysis_id).execute()
+    record_activity(actor_id=identity["id"], actor_role="child", action="medicine.confirm", target_type="medication_log", target_id=str(inserted["id"]), child_id=identity["id"], description="Confirmed medicine analysis.")
+    return _confirmation(_medicine_history(inserted), identity["id"], affected)
+
+
+def history_list(child_id: str, history_type: str, limit: int, cursor: str | None) -> dict[str, Any]:
+    if history_type not in {"food", "medicine"}: raise api_error(422, "validation_error", "History type must be food or medicine.")
+    table = "food_logs" if history_type == "food" else "medication_logs"
+    order_field = "consumed_at" if history_type == "food" else "administered_at"
+    query = get_supabase_service_client().table(table).select("*").eq("child_id", child_id)
+    if cursor: query = query.lt(order_field, cursor)
+    rows = query.order(order_field, desc=True).limit(limit + 1).execute().data or []
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    mapper = _food_history if history_type == "food" else _medicine_history
+    return {"items": [mapper(row) for row in rows], "nextCursor": rows[-1].get(order_field) if has_more and rows else None}
+
+
+@router.get("/me/history")
+def get_history(history_type: str = Query("food", alias="type"), limit: int = Query(20, ge=1, le=100), cursor: str | None = None, identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
+    return history_list(identity["id"], history_type, limit, cursor)
+
+
+def history_detail(child_id: str, history_id: str) -> dict[str, Any]:
+    client = get_supabase_service_client()
+    food = client.table("food_logs").select("*").eq("id", history_id).eq("child_id", child_id).execute().data or []
+    if food:
+        row = food[0]
+        nutrition = row.get("nutrition") or {}
+        return {"history": _food_history(row), "analysis": {
+            "analysisId": str(row.get("analysis_id") or ""), "foodName": row.get("food_name"),
+            "portionGrams": row.get("portion_grams"), "caloriesKcal": row.get("calories"),
+            "sugarAmountGrams": nutrition.get("sugar_g", 0), "carbohydratesGrams": nutrition.get("carbs_g", 0),
+            "fiberGrams": nutrition.get("fiber_g", 0), "proteinGrams": nutrition.get("protein_g", 0),
+            "fatGrams": nutrition.get("fat_g", 0), "imageUrl": row.get("photo_url"),
+        }}
+    meds = client.table("medication_logs").select("*").eq("id", history_id).eq("child_id", child_id).execute().data or []
+    if meds: return {"history": _medicine_history(meds[0]), "analysis": None}
+    raise api_error(404, "history_not_found", "History item was not found.")
+
+
+@router.get("/me/history/{history_id}")
+def get_history_detail(history_id: str, identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
+    return history_detail(identity["id"], history_id)
+
 
 @router.get("/me/notifications")
-def get_notifications(
-    limit: int = Query(20),
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Any:
-    # Dummy MVP notifications
-    return {"items": [], "nextCursor": None}
+def get_notifications(limit: int = Query(20, ge=1, le=100), cursor: str | None = None, identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
+    query = get_supabase_service_client().table("alerts").select("*").eq("child_id", identity["id"])
+    if cursor: query = query.lt("created_at", cursor)
+    rows = query.order("created_at", desc=True).limit(limit + 1).execute().data or []
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return {"items": [notification(row) for row in rows], "nextCursor": rows[-1].get("created_at") if has_more and rows else None}
+
 
 @router.patch("/me/notifications/{notification_id}/read")
-def read_notification(
-    notification_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Any:
-    return {
-        "id": notification_id,
-        "childId": current_user["id"],
-        "senderType": "system",
-        "title": "Read Notification",
-        "message": "",
-        "isRead": True,
-        "createdAt": datetime.now(timezone.utc).isoformat()
-    }
+def mark_notification_read(notification_id: str, identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
+    rows = get_supabase_service_client().table("alerts").update({"is_read": True}).eq("id", notification_id).eq("child_id", identity["id"]).execute().data or []
+    if not rows: raise api_error(404, "notification_not_found", "Notification was not found.")
+    record_activity(actor_id=identity["id"], actor_role="child", action="notification.read", target_type="notification", target_id=notification_id, child_id=identity["id"], description="Marked notification as read.")
+    return notification(rows[0])

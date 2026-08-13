@@ -31,33 +31,24 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Nutrient IDs dari standar USDA FoodData Central
-_NUTRIENT_ENERGY_KCAL = 1008
-_NUTRIENT_PROTEIN = 1003
-_NUTRIENT_FAT = 1004
-_NUTRIENT_CARBS = 1005
-_NUTRIENT_SUGAR = 1063
-_NUTRIENT_FIBER = 1079
+_NUTRIENT_ENERGY_KCAL = [1008, 1062, 2047, 2048]
+_NUTRIENT_PROTEIN = [1003]
+_NUTRIENT_FAT = [1004, 1085]
+_NUTRIENT_CARBS = [1005, 1050]
+_NUTRIENT_SUGAR = [1063, 2000]
+_NUTRIENT_FIBER = [1079, 2033]
 
 # Tipe data untuk satu item nutrisi yang sudah disederhanakan
 NutritionEntry = Dict[str, object]
 
+def _get_first_available(nutrient_map: Dict[int, float], ids: List[int]) -> float:
+    """Mengambil nilai nutrisi pertama yang tersedia dari daftar ID alternatif. Default ke 0.0 jika tidak ada."""
+    for eid in ids:
+        if eid in nutrient_map:
+            return nutrient_map[eid]
+    return 0.0
 
-def _extract_nutrients(food_nutrients: list) -> Dict[str, Optional[float]]:
-    """Ekstrak hanya nutrisi yang kita butuhkan dari daftar foodNutrients.
-
-    FoodData Central menyimpan BANYAK sekali nutrisi (vitamin, asam lemak, dll).
-    Kita hanya butuh 6: kalori, protein, lemak, karbohidrat, gula, serat.
-
-    Semua nilai adalah per 100g bahan makanan.
-
-    Args:
-        food_nutrients: List objek FoodNutrient dari JSON mentah
-
-    Returns:
-        Dict dengan keys: kcal, protein_g, fat_g, carbs_g, sugar_g, fiber_g
-        Value None jika nutrisi tidak tersedia di data
-    """
+def _extract_nutrients(food_nutrients: list) -> Dict[str, float]:
     # Buat lookup dict nutrient_id → amount dari list
     nutrient_map: Dict[int, float] = {}
     for fn in food_nutrients:
@@ -66,40 +57,26 @@ def _extract_nutrients(food_nutrients: list) -> Dict[str, Optional[float]]:
         if nutrient_id and amount is not None:
             nutrient_map[int(nutrient_id)] = float(amount)
 
+    # Kalori di-treat khusus karena kita skip makanan tanpa kalori
+    kcal_val = None
+    for eid in _NUTRIENT_ENERGY_KCAL:
+        if eid in nutrient_map:
+            kcal_val = nutrient_map[eid]
+            break
+
     return {
-        "kcal": nutrient_map.get(_NUTRIENT_ENERGY_KCAL),
-        "protein_g": nutrient_map.get(_NUTRIENT_PROTEIN),
-        "fat_g": nutrient_map.get(_NUTRIENT_FAT),
-        "carbs_g": nutrient_map.get(_NUTRIENT_CARBS),
-        "sugar_g": nutrient_map.get(_NUTRIENT_SUGAR),
-        "fiber_g": nutrient_map.get(_NUTRIENT_FIBER),
+        "kcal": kcal_val,  # Bisa None, untuk difilter di _load
+        "protein_g": _get_first_available(nutrient_map, _NUTRIENT_PROTEIN),
+        "fat_g": _get_first_available(nutrient_map, _NUTRIENT_FAT),
+        "carbs_g": _get_first_available(nutrient_map, _NUTRIENT_CARBS),
+        "sugar_g": _get_first_available(nutrient_map, _NUTRIENT_SUGAR),
+        "fiber_g": _get_first_available(nutrient_map, _NUTRIENT_FIBER),
     }
 
 
 class FoodDataService:
-    """In-memory index untuk FoodData Central.
-
-    Diinisialisasi sekali saat startup via get_food_data_service().
-    Menyimpan dua index:
-      1. _by_id   : {fdcId → NutritionEntry}   → lookup O(1) by ID
-      2. _by_name : {lowercased_word → [fdcId]} → search by keyword
-
-    Data yang disimpan per entry:
-      fdcId, description, kcal, protein_g, fat_g, carbs_g, sugar_g, fiber_g
-    """
-
     def __init__(self, json_path: str) -> None:
-        """Load dan index FoodData JSON dari path yang diberikan.
-
-        Args:
-            json_path: Path absolut ke file JSON FoodData Central
-
-        Raises:
-            FileNotFoundError: Jika file tidak ditemukan
-            json.JSONDecodeError: Jika file bukan JSON yang valid
-        """
         self._by_id: Dict[int, NutritionEntry] = {}
-        self._by_name: Dict[str, List[int]] = {}  # keyword → list fdcId
         self._total_loaded = 0
 
         logger.info(f"Memuat FoodData Central dari: {json_path}")
@@ -110,15 +87,12 @@ class FoodDataService:
         )
 
     def _load(self, json_path: str) -> None:
-        """Parse JSON dan bangun kedua index."""
         with open(json_path, "r", encoding="utf-8") as f:
             raw = json.load(f)
 
-        # FoundationFoods adalah key utama di file FoodData Central
         foods = raw.get("FoundationFoods", [])
 
         for food in foods:
-            # Skip item None yang kadang muncul di JSON (malformed data)
             if not food or not isinstance(food, dict):
                 continue
 
@@ -129,10 +103,8 @@ class FoodDataService:
             if not fdc_id or not description:
                 continue
 
-            # Ekstrak hanya nutrisi yang kita butuhkan
             nutrients = _extract_nutrients(food_nutrients)
 
-            # Skip makanan yang tidak punya data kalori
             if nutrients["kcal"] is None:
                 continue
 
@@ -142,65 +114,31 @@ class FoodDataService:
                 **nutrients,
             }
 
-            # Index 1: lookup by fdcId
             self._by_id[int(fdc_id)] = entry
-
-            # Index 2: inverted index by kata (untuk search by name)
-            # Contoh: "Tomatoes, grape, raw" → ["tomatoes", "grape", "raw"]
-            for word in description.lower().replace(",", " ").split():
-                if len(word) >= 3:  # Abaikan kata pendek (a, of, the, dll)
-                    if word not in self._by_name:
-                        self._by_name[word] = []
-                    self._by_name[word].append(int(fdc_id))
-
             self._total_loaded += 1
 
     def lookup_by_fdc_id(self, fdc_id: int) -> Optional[NutritionEntry]:
-        """Cari data nutrisi berdasarkan fdcId USDA.
-
-        Args:
-            fdc_id: ID unik makanan di USDA FoodData Central
-
-        Returns:
-            NutritionEntry atau None jika tidak ditemukan
-        """
+        """Cari data nutrisi berdasarkan fdcId USDA."""
         return self._by_id.get(fdc_id)
 
     def search_by_name(self, query: str, max_results: int = 10) -> List[NutritionEntry]:
-        """Cari makanan berdasarkan nama (partial match).
-
-        Cara kerja:
-          1. Pecah query menjadi kata-kata
-          2. Setiap kata di-lookup di inverted index
-          3. fdcId yang muncul di SEMUA kata mendapat skor tertinggi
-          4. Kembalikan top N hasil
-
-        Contoh:
-          search_by_name("raw tomato") → cari makanan yang namanya
-          mengandung kata "raw" DAN/ATAU "tomato"
-
-        Args:
-            query: Nama makanan dalam bahasa Inggris
-            max_results: Maksimal hasil yang dikembalikan
-
-        Returns:
-            List NutritionEntry, diurutkan dari paling relevan
-        """
+        """Cari makanan berdasarkan nama (partial match)."""
         words = [w.lower() for w in query.replace(",", " ").split() if len(w) >= 3]
 
         if not words:
             return []
 
-        # Hitung skor: berapa banyak kata dari query yang cocok per fdcId
-        scores: Dict[int, int] = {}
-        for word in words:
-            for fdc_id in self._by_name.get(word, []):
-                scores[fdc_id] = scores.get(fdc_id, 0) + 1
+        # Cari yang mengandung semua kata, lalu skor berdasarkan pendeknya deskripsi
+        matches = []
+        for entry in self._by_id.values():
+            desc_lower = str(entry["description"]).lower()
+            if all(word in desc_lower for word in words):
+                matches.append(entry)
 
-        # Sort by skor (descending), ambil top N
-        sorted_ids = sorted(scores, key=lambda x: scores[x], reverse=True)[:max_results]
+        # Sort matches by length of description (ascending) so exact matches appear first
+        sorted_matches = sorted(matches, key=lambda x: len(str(x["description"])))
 
-        return [self._by_id[fdc_id] for fdc_id in sorted_ids if fdc_id in self._by_id]
+        return sorted_matches[:max_results]
 
     def calculate_nutrition_for_meal(
         self, ingredients: List[Dict]

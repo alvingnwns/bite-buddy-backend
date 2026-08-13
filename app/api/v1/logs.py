@@ -1,53 +1,55 @@
-from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from app.core.auth import get_current_user
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from fastapi import APIRouter, Depends, Query
+
+from app.api.deps import get_identity
+from app.api.errors import api_error
 from app.core.supabase import get_supabase_service_client
 
 router = APIRouter()
 
+
 @router.get("/activity-logs")
 def get_activity_logs(
-    month: str = Query(..., description="Format YYYY-MM"),
-    timezone: str = Query("Asia/Jakarta"),
-    current_user: Dict[str, Any] = Depends(get_current_user)
-) -> Any:
-    """
-    Mendapatkan riwayat aktivitas berdasarkan partisi bulan.
-    Mematuhi rule global: "generate activitylogs per bulan".
-    """
-    client = get_supabase_service_client()
-    user_id = current_user["id"]
-    
+    month: str = Query(..., pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    timezone_name: str = Query("Asia/Jakarta", alias="timezone"),
+    limit: int = Query(50, ge=1, le=100),
+    cursor: str | None = None,
+    identity: dict[str, Any] = Depends(get_identity),
+) -> dict[str, Any]:
     try:
-        # Karena kita menggunakan partitioned table di PostgreSQL (activity_logs_YYYY_MM),
-        # query ke tabel parent 'activity_logs' dengan filter created_at otomatis akan mem-prune 
-        # (hanya mencari di partisi bulan tersebut).
-        
-        # Parse month bounds
-        from datetime import datetime
-        import calendar
-        year, mth = map(int, month.split("-"))
-        _, last_day = calendar.monthrange(year, mth)
-        
-        start_date = f"{year}-{mth:02d}-01T00:00:00Z"
-        end_date = f"{year}-{mth:02d}-{last_day}T23:59:59Z"
-        
-        resp = client.table("activity_logs") \
-            .select("*") \
-            .eq("user_id", user_id) \
-            .gte("created_at", start_date) \
-            .lte("created_at", end_date) \
-            .order("created_at", desc=True) \
-            .limit(100) \
-            .execute()
-            
-        return {
-            "month": month,
-            "timezone": timezone,
-            "logs": resp.data if resp.data else []
-        }
-    except Exception as e:
-        # Jika tabel belum ada, kita bisa kembalikan kosong untuk MVP
-        if "relation \"public.activity_logs\" does not exist" in str(e):
-            return {"month": month, "timezone": timezone, "logs": [], "warning": "Migration 008_activity_logs.sql has not been executed."}
-        raise HTTPException(status_code=500, detail=str(e))
+        zone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        raise api_error(422, "validation_error", "Timezone is invalid.", {"fields": {"timezone": ["Unknown IANA timezone."]}})
+    year, month_number = map(int, month.split("-"))
+    start_local = datetime(year, month_number, 1, tzinfo=zone)
+    if month_number == 12:
+        end_local = datetime(year + 1, 1, 1, tzinfo=zone)
+    else:
+        end_local = datetime(year, month_number + 1, 1, tzinfo=zone)
+    start_utc = start_local.astimezone(timezone.utc).isoformat()
+    end_utc = end_local.astimezone(timezone.utc).isoformat()
+    query = (
+        get_supabase_service_client().table("activity_logs").select("*")
+        .eq("user_id", identity["id"]).gte("created_at", start_utc).lt("created_at", end_utc)
+    )
+    if cursor: query = query.lt("created_at", cursor)
+    rows = query.order("created_at", desc=True).limit(limit + 1).execute().data or []
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    items = []
+    for row in rows:
+        metadata = row.get("metadata") or {}
+        items.append({
+            "id": str(row["id"]), "actorId": str(row["user_id"]),
+            "actorRole": metadata.get("role", identity["role"]), "actionType": row["action"],
+            "targetType": row["entity_type"], "targetId": str(row["entity_id"]) if row.get("entity_id") else None,
+            "childId": str(metadata["child_id"]) if metadata.get("child_id") else None,
+            "description": metadata.get("description", ""), "outcome": metadata.get("outcome", "success"),
+            "occurredAt": row["created_at"],
+        })
+    return {"month": month, "timezone": timezone_name, "items": items, "nextCursor": rows[-1].get("created_at") if has_more and rows else None}

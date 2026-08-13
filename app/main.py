@@ -1,11 +1,15 @@
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from uuid import uuid4
 
 from app.api.v1.router import api_v1_router
 from app.core.config import settings
+from app.api.errors import http_exception_handler
 
 
 from app.workers.scheduler import start_scheduler, stop_scheduler
@@ -26,10 +30,6 @@ def create_app() -> FastAPI:
         debug=settings.debug,
         lifespan=lifespan,
     )
-
-    from fastapi.exceptions import RequestValidationError
-    from fastapi.responses import JSONResponse
-    from fastapi import Request
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -52,14 +52,35 @@ def create_app() -> FastAPI:
                 "details": {
                     "fields": fields
                 },
-                "requestId": request.headers.get("x-request-id", "unknown")
+                "requestId": getattr(request.state, "request_id", "unknown")
             },
         )
+
+    app.add_exception_handler(HTTPException, http_exception_handler)
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, _: Exception):
+        return JSONResponse(
+            status_code=500,
+            content={
+                "code": "internal_error",
+                "message": "An unexpected error occurred.",
+                "details": {},
+                "requestId": getattr(request.state, "request_id", "unknown"),
+            },
+        )
+
+    @app.middleware("http")
+    async def request_id_middleware(request: Request, call_next):
+        request.state.request_id = request.headers.get("x-request-id") or str(uuid4())
+        response = await call_next(request)
+        response.headers["x-request-id"] = request.state.request_id
+        return response
 
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )

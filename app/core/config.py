@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,7 +20,7 @@ class Settings(BaseSettings):
     app_name: str = "BiteBuddy API"
     app_version: str = "0.1.0"
     debug: bool = False
-    cors_origins: str = "http://localhost:3000,http://localhost:8081"
+    cors_origins: str = "*"
 
     # ── Supabase ──────────────────────────────
     supabase_url: str = ""
@@ -34,6 +35,17 @@ class Settings(BaseSettings):
     gemini_food_model: str = "gemini-3.5-flash"       # Untuk deteksi makanan dari foto
     gemini_medicine_model: str = "gemini-3.5-flash"   # Untuk deteksi obat/insulin dari foto
     gemini_nutrition_model: str = "gemini-3.5-flash"  # Untuk estimasi kalori & makronutrien
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def normalize_debug_mode(cls, value: object) -> object:
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"release", "production", "prod"}:
+                return False
+            if normalized in {"development", "debug", "dev"}:
+                return True
+        return value
 
     @property
     def cors_origins_list(self) -> list[str]:

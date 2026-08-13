@@ -1,7 +1,6 @@
 import os
 from unittest.mock import patch
 from app.core.supabase import get_supabase_service_client
-from app.api.v1.children import food_drafts, med_drafts
 
 @patch("app.api.v1.children.ai_service.detect_food_ingredients")
 @patch("app.api.v1.children.storage_service.upload_image")
@@ -27,12 +26,12 @@ def test_e2e_scan_food_healthy(mock_upload, mock_detect, test_client, setup_e2e_
     dummy_image_content = img_byte_arr.getvalue()
     files = {"file": ("apple.jpg", dummy_image_content, "image/jpeg")}
 
-    mock_detect.return_value = [{"ingredient": "apple", "description": "Apples, raw", "weight_g": 150, "fdcId": 171688}]
+    mock_detect.return_value = (True, [{"ingredient": "apple", "description": "Apples, raw", "weight_g": 150, "fdcId": 171688}])
     mock_upload.return_value = "http://dummy.url/apple.jpg"
     
     # 2. Tembak Endpoint Analyze
     response = test_client.post("/api/v1/children/me/food-analyses", files=files)
-    assert response.status_code == 200, response.text
+    assert response.status_code == 201, response.text
     
     json_response = response.json()
     assert json_response["status"] == "draft"
@@ -83,7 +82,7 @@ def test_e2e_scan_medicine(mock_upload, mock_detect_meds, test_client, setup_e2e
     mock_upload.return_value = "http://dummy.url/meds.jpg"
     
     response = test_client.post("/api/v1/children/me/medicine-analyses", files=files)
-    assert response.status_code == 200, response.text
+    assert response.status_code == 201, response.text
     
     json_response = response.json()
     assert json_response["isMedicine"] == True
