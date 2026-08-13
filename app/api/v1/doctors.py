@@ -234,6 +234,33 @@ def _require_active_patient(doctor_id: str, patient_id: str) -> None:
         raise api_error(403, "forbidden", "This operation is not permitted.")
 
 
+def _resolve_active_patient_id(doctor_id: str, patient_id: str) -> str:
+    """Resolve either a claimed Child ID or its former invitation ID."""
+    client = get_supabase_service_client()
+    rows = (
+        client.table("users").select("id").eq("id", patient_id)
+        .eq("doctor_id", doctor_id).eq("role", "child").eq("is_active", True)
+        .execute().data or []
+    )
+    if rows:
+        return str(rows[0]["id"])
+    invitations = (
+        client.table("patient_invitations").select("claimed_user_id")
+        .eq("id", patient_id).eq("doctor_id", doctor_id).eq("status", "claimed")
+        .execute().data or []
+    )
+    claimed_user_id = invitations[0].get("claimed_user_id") if invitations else None
+    if claimed_user_id:
+        claimed = (
+            client.table("users").select("id").eq("id", claimed_user_id)
+            .eq("doctor_id", doctor_id).eq("role", "child").eq("is_active", True)
+            .execute().data or []
+        )
+        if claimed:
+            return str(claimed[0]["id"])
+    raise api_error(403, "forbidden", "This operation is not permitted.")
+
+
 def _as_utc(value: str | datetime) -> datetime:
     parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     if parsed.tzinfo is None:
@@ -614,7 +641,7 @@ def create_appointment(
     req: AppointmentCreate, patient_id: str, request: Request,
     doctor: dict[str, Any] = Depends(require_doctor),
 ) -> dict[str, Any]:
-    _require_active_patient(doctor["id"], patient_id)
+    patient_id = _resolve_active_patient_id(doctor["id"], patient_id)
     row = _rpc_row("doctor_create_appointment", {
         "p_doctor_id": doctor["id"], "p_patient_id": patient_id,
         "p_title": req.title,

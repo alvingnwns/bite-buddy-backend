@@ -15,6 +15,7 @@ DOCTOR_ID = "00000000-0000-0000-0000-000000000010"
 PATIENT_ID = "00000000-0000-0000-0000-000000000020"
 OTHER_PATIENT_ID = "00000000-0000-0000-0000-000000000021"
 PARENT_ID = "00000000-0000-0000-0000-000000000030"
+CLAIMED_INVITATION_ID = "00000000-0000-0000-0000-000000000040"
 
 
 class Query:
@@ -60,6 +61,9 @@ class FakeClient:
                 {"id": PATIENT_ID, "doctor_id": DOCTOR_ID, "parent_id": PARENT_ID, "role": "child", "is_active": True},
                 {"id": OTHER_PATIENT_ID, "doctor_id": "other-doctor", "role": "child", "is_active": True},
                 {"id": PARENT_ID, "role": "parent", "is_active": True},
+            ],
+            "patient_invitations": [
+                {"id": CLAIMED_INVITATION_ID, "doctor_id": DOCTOR_ID, "status": "claimed", "claimed_user_id": PATIENT_ID},
             ],
             "blood_glucose_records": [
                 {"id": "g-2", "patient_id": PATIENT_ID, "value_mg_dl": 130, "recorded_at": (now - timedelta(hours=1)).isoformat()},
@@ -217,6 +221,19 @@ def test_doctor_schedules_canonical_appointment(monkeypatch):
     assert response.json()["title"] == "Routine Check Up"
     assert response.json()["startsAt"] == "2026-08-20T03:00:00Z"
     assert response.json()["status"] == "scheduled"
+
+
+def test_doctor_schedules_appointment_from_stale_claimed_invitation_id(monkeypatch):
+    setup(monkeypatch)
+    try:
+        response = TestClient(app).post(
+            f"/api/v1/doctors/me/patients/{CLAIMED_INVITATION_ID}/appointments",
+            json={"title": "Follow Up", "startsAt": "2026-08-20T10:00:00+07:00"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 201
+    assert response.json()["patientId"] == PATIENT_ID
 
 
 def test_doctor_creates_diagnosis_without_implicit_patient_side_effects(monkeypatch):
