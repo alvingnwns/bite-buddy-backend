@@ -4,11 +4,13 @@ import re
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import ConfigDict
 
 from app.api.deps import get_identity
 from app.api.errors import api_error
+from app.core.auth import security
 from app.core.supabase import get_supabase_service_client
 from app.models.base import CamelModel
 from app.models.database import Gender, UserRole
@@ -89,12 +91,17 @@ def _session_payload(session: Any, user: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.post("/login")
-def login(req: LoginRequest) -> dict[str, Any]:
+def login(req: LoginRequest, request: Request) -> dict[str, Any]:
     client = get_supabase_service_client()
     expected_user: dict[str, Any] | None = None
     if req.role == UserRole.doctor:
         code = _doctor_code(req.doctor_code)
         if not code:
+            record_activity(
+                actor_id=None, actor_role="doctor", action="auth.login",
+                target_type="session", description="Sign-in failed.", outcome="failure",
+                request_id=request.state.request_id,
+            )
             raise api_error(422, "validation_error", "One or more fields are invalid.", {
                 "fields": {"doctorCode": ["Required for a Doctor account."]}
             })
@@ -104,6 +111,11 @@ def login(req: LoginRequest) -> dict[str, Any]:
             .execute().data or []
         )
         if len(rows) != 1:
+            record_activity(
+                actor_id=None, actor_role="doctor", action="auth.login",
+                target_type="session", description="Sign-in failed.", outcome="failure",
+                request_id=request.state.request_id,
+            )
             raise api_error(401, "invalid_credentials", "Invalid Doctor code or password.")
         expected_user = rows[0]
         email = str(expected_user["email"])
@@ -119,6 +131,13 @@ def login(req: LoginRequest) -> dict[str, Any]:
             {"email": email, "password": req.password}
         )
     except Exception:
+        if expected_user:
+            record_activity(
+                actor_id=str(expected_user["id"]), actor_role="doctor",
+                action="auth.login", target_type="session",
+                description="Sign-in failed.", outcome="failure",
+                request_id=request.state.request_id,
+            )
         message = "Invalid Doctor code or password." if req.role == UserRole.doctor else "Invalid username or password."
         raise api_error(401, "invalid_credentials", message)
     if not auth_response.user:
@@ -140,13 +159,13 @@ def login(req: LoginRequest) -> dict[str, Any]:
         raise api_error(401, "invalid_credentials", "Invalid username or password.")
     record_activity(
         actor_id=str(user["id"]), actor_role=user["role"], action="auth.login",
-        target_type="session", description="Signed in."
+        target_type="session", description="Signed in.", request_id=request.state.request_id
     )
     return _session_payload(auth_response.session, user)
 
 
 @router.post("/register", status_code=201)
-def register(req: RegisterRequest) -> dict[str, Any]:
+def register(req: RegisterRequest, request: Request) -> dict[str, Any]:
     doctor_code = _doctor_code(req.doctor_code)
     username = (req.username or "").strip()
     if req.role == UserRole.doctor:
@@ -168,6 +187,12 @@ def register(req: RegisterRequest) -> dict[str, Any]:
         if not (req.address or "").strip():
             fields["address"] = ["Required for a Doctor account."]
     if fields:
+        record_activity(
+            actor_id=None, actor_role=req.role.value, action="auth.register",
+            target_type="user", description="Registration failed validation.",
+            outcome="failure", request_id=request.state.request_id,
+            metadata={"invalid_fields": sorted(fields)},
+        )
         raise api_error(422, "validation_error", "One or more fields are invalid.", {"fields": fields})
 
     client = get_supabase_service_client()
@@ -231,12 +256,17 @@ def register(req: RegisterRequest) -> dict[str, Any]:
                 client.auth.admin.delete_user(created_user_id)
             except Exception:
                 pass
+        record_activity(
+            actor_id=None, actor_role=req.role.value, action="auth.register",
+            target_type="user", description="Registration failed.", outcome="failure",
+            request_id=request.state.request_id,
+        )
         raise api_error(409, "registration_failed", "The account could not be registered.")
 
     record_activity(
         actor_id=created_user_id, actor_role=req.role.value, action="auth.register",
         target_type="user", target_id=created_user_id, child_id=created_user_id if req.role == UserRole.child else None,
-        description="Registered account."
+        description="Registered account.", request_id=request.state.request_id
     )
     return {
         "userId": created_user_id,
@@ -250,33 +280,48 @@ def register(req: RegisterRequest) -> dict[str, Any]:
 
 
 @router.post("/refresh")
-def refresh(req: RefreshRequest) -> dict[str, Any]:
+def refresh(req: RefreshRequest, request: Request) -> dict[str, Any]:
     client = get_supabase_service_client()
     try:
         auth_response = client.auth.refresh_session(req.refresh_token)
         response = client.table("users").select(_auth_select()).eq("id", auth_response.user.id).single().execute()
     except Exception:
         raise api_error(401, "refresh_failed", "The session could not be refreshed.")
-    if not response.data:
+    user = response.data
+    if not user or not user.get("is_active", True):
         raise api_error(401, "refresh_failed", "The session could not be refreshed.")
-    return _session_payload(auth_response.session, response.data)
+    record_activity(
+        actor_id=str(user["id"]), actor_role=user["role"], action="auth.refresh",
+        target_type="session", description="Session refreshed.",
+        request_id=request.state.request_id,
+    )
+    return _session_payload(auth_response.session, user)
 
 
 @router.post("/logout", status_code=204)
-def logout(req: LogoutRequest, identity: dict[str, Any] = Depends(get_identity)) -> None:
+def logout(
+    request: Request,
+    identity: dict[str, Any] = Depends(get_identity),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    req: LogoutRequest | None = None,
+) -> None:
     client = get_supabase_service_client()
-    if req.refresh_token:
-        try:
-            client.auth.refresh_session(req.refresh_token)
-            client.auth.sign_out()
-        except Exception:
-            pass
+    try:
+        client.auth.admin.sign_out(credentials.credentials, scope="local")
+    except Exception:
+        raise api_error(503, "logout_failed", "The session could not be ended.")
     record_activity(
         actor_id=identity["id"], actor_role=identity["role"], action="auth.logout",
-        target_type="session", description="Signed out."
+        target_type="session", description="Signed out.", request_id=request.state.request_id,
+        metadata={"refresh_token_submitted": bool(req and req.refresh_token)},
     )
 
 
 @router.get("/me")
-def get_me(identity: dict[str, Any] = Depends(get_identity)) -> dict[str, Any]:
+def get_me(request: Request, identity: dict[str, Any] = Depends(get_identity)) -> dict[str, Any]:
+    record_activity(
+        actor_id=identity["id"], actor_role=identity["role"], action="auth.me",
+        target_type="user", target_id=identity["id"], description="Restored identity.",
+        request_id=request.state.request_id,
+    )
     return {"user": _identity(identity)}

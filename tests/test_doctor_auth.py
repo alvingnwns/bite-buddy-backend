@@ -50,11 +50,17 @@ class FakeUsersQuery:
 
 
 class FakeAdmin:
+    def __init__(self):
+        self.signed_out: list[tuple[str, str]] = []
+
     def create_user(self, _payload):
         return SimpleNamespace(user=SimpleNamespace(id=DOCTOR_ID))
 
     def delete_user(self, _user_id):
         return None
+
+    def sign_out(self, jwt, scope="global"):
+        self.signed_out.append((jwt, scope))
 
 
 class FakeAuth:
@@ -67,6 +73,13 @@ class FakeAuth:
         return SimpleNamespace(
             user=SimpleNamespace(id=user["id"]),
             session=SimpleNamespace(access_token="access", refresh_token="refresh"),
+        )
+
+    def refresh_session(self, _refresh_token):
+        user = self.client.users[0]
+        return SimpleNamespace(
+            user=SimpleNamespace(id=user["id"]),
+            session=SimpleNamespace(access_token="renewed", refresh_token="rotated"),
         )
 
 
@@ -118,6 +131,47 @@ def test_doctor_login_returns_canonical_identity(monkeypatch):
             "fullName": "Dr. Bite Buddy",
         },
     }
+
+
+def test_failed_doctor_login_is_audited(monkeypatch):
+    client = FakeClient([doctor_user()])
+    events = []
+    monkeypatch.setattr(auth_api, "get_supabase_service_client", lambda: client)
+    monkeypatch.setattr(auth_api, "record_activity", lambda **kwargs: events.append(kwargs))
+    monkeypatch.setattr(
+        client.auth,
+        "sign_in_with_password",
+        lambda _credentials: (_ for _ in ()).throw(RuntimeError("invalid password")),
+    )
+
+    response = TestClient(app).post("/api/v1/auth/login", json={
+        "doctorCode": "D0987",
+        "password": "wrong-password",
+        "role": "doctor",
+    })
+
+    assert response.status_code == 401
+    assert events[0]["actor_id"] == DOCTOR_ID
+    assert events[0]["outcome"] == "failure"
+    assert "password" not in str(events[0]).lower()
+
+
+def test_unknown_doctor_login_is_audited_without_identifier(monkeypatch):
+    client = FakeClient()
+    events = []
+    monkeypatch.setattr(auth_api, "get_supabase_service_client", lambda: client)
+    monkeypatch.setattr(auth_api, "record_activity", lambda **kwargs: events.append(kwargs))
+
+    response = TestClient(app).post("/api/v1/auth/login", json={
+        "doctorCode": "UNKNOWN",
+        "password": "wrong-password",
+        "role": "doctor",
+    })
+
+    assert response.status_code == 401
+    assert events[0]["actor_id"] is None
+    assert events[0]["outcome"] == "failure"
+    assert "UNKNOWN" not in str(events[0])
 
 
 def test_login_role_must_match_persisted_role(monkeypatch):
@@ -178,6 +232,43 @@ def test_auth_me_returns_doctor_identity():
     assert response.status_code == 200
     assert response.json()["user"]["doctorId"] == DOCTOR_ID
     assert response.json()["user"]["doctorCode"] == "D0987"
+
+
+def test_refresh_rejects_inactive_account(monkeypatch):
+    user = doctor_user()
+    user["is_active"] = False
+    client = FakeClient([user])
+    monkeypatch.setattr(auth_api, "get_supabase_service_client", lambda: client)
+
+    response = TestClient(app).post("/api/v1/auth/refresh", json={"refreshToken": "refresh"})
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "refresh_failed"
+
+
+def test_logout_revokes_current_bearer_session(monkeypatch):
+    client = FakeClient([doctor_user()])
+    monkeypatch.setattr(auth_api, "get_supabase_service_client", lambda: client)
+    monkeypatch.setattr(auth_api, "record_activity", lambda **_kwargs: None)
+    app.dependency_overrides[get_identity] = doctor_user
+    try:
+        response = TestClient(app).post(
+            "/api/v1/auth/logout",
+            headers={"Authorization": "Bearer current-access"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 204
+    assert client.auth.admin.signed_out == [("current-access", "local")]
+
+
+def test_missing_bearer_uses_structured_401():
+    response = TestClient(app).get("/api/v1/auth/me")
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "authentication_required"
+    assert response.json()["requestId"] != "unknown"
 
 
 def test_require_doctor_rejects_non_doctor():

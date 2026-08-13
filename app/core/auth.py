@@ -5,12 +5,14 @@ import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
+from app.api.errors import api_error
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 # HTTPBearer akan secara otomatis mengekstrak token dari header 'Authorization: Bearer <token>'
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 def decode_jwt(token: str) -> Dict[str, Any]:
     """
@@ -50,12 +52,17 @@ def decode_jwt(token: str) -> Dict[str, Any]:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+) -> Dict[str, Any]:
     """
     FastAPI Dependency untuk melindungi endpoint.
     Jika token valid, ini akan mengembalikan data payload token.
     Jika tidak valid/tidak ada, FastAPI akan me-return HTTP 401 Unauthorized otomatis.
     """
+    if credentials is None:
+        raise api_error(401, "authentication_required", "Authentication is required.")
+
     token = credentials.credentials
     payload = decode_jwt(token)
     
