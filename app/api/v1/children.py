@@ -139,7 +139,13 @@ async def analyze_food(file: UploadFile = File(...), identity: dict[str, Any] = 
         raise api_error(400, "food_not_detected", "No food was detected in the image.")
     totals = reasoning_service.calculate_totals(ingredients)
     portion = sum(float(item.get("weight_g", 0) or 0) for item in ingredients) or 100
-    payload = {"ingredients": ingredients, "foodName": food_name, "portionGrams": portion, "nutrition": totals}
+    sources = sorted({str(item.get("dataSource") or "Unknown") for item in ingredients})
+    estimated_nutrients = ["sugar_g"] if any(item.get("sugarEstimated") for item in ingredients) else []
+    payload = {
+        "ingredients": ingredients, "foodName": food_name, "portionGrams": portion,
+        "nutrition": totals, "nutritionSources": sources,
+        "estimatedNutrients": estimated_nutrients,
+    }
     inserted = get_supabase_service_client().table("analysis_drafts").insert({
         "child_id": identity["id"], "analysis_type": "food", "payload": payload,
         "image_url": public_url, "status": "draft",
@@ -163,6 +169,8 @@ def _food_draft(row: dict[str, Any]) -> dict[str, Any]:
         "carbohydratesGrams": nutrition.get("carbs_g", 0), "fiberGrams": nutrition.get("fiber_g", 0),
         "proteinGrams": nutrition.get("protein_g", 0), "fatGrams": nutrition.get("fat_g", 0),
         "imageUrl": row["image_url"], "status": row["status"],
+        "nutritionSources": payload.get("nutritionSources", []),
+        "estimatedNutrients": payload.get("estimatedNutrients", []),
     }
 
 

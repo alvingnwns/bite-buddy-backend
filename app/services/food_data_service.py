@@ -23,9 +23,12 @@ Nutrient IDs yang dipakai dari FoodData Central:
   1079 → Fiber, total dietary (g)
 """
 
+import csv
 import json
 import logging
 import os
+import re
+import unicodedata
 from functools import lru_cache
 from typing import Dict, List, Optional
 
@@ -74,17 +77,96 @@ def _extract_nutrients(food_nutrients: list) -> Dict[str, float]:
     }
 
 
+_TKPI_ALIASES = {
+    "ice cream": "es krim",
+    "fried rice": "nasi goreng",
+    "spinach": "bayam",
+    "carrot": "wortel",
+    "broccoli": "brokoli",
+    "cabbage": "kol",
+    "lettuce": "selada",
+    "tomato": "tomat",
+    "cucumber": "ketimun",
+    "eggplant": "terong",
+    "green bean": "buncis",
+    "corn": "jagung",
+    "chicken": "ayam",
+    "beef": "sapi",
+    "fish": "ikan",
+    "rice": "nasi",
+    "tofu": "tahu",
+    "tempeh": "tempe",
+}
+
+_SWEET_FOOD_TERMS = {
+    "es krim", "ice cream", "gula", "sirup", "permen", "cokelat", "cake",
+    "kue", "dodol", "selai", "susu kental manis", "sweetened",
+}
+
+
+def _normalize_name(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode().lower()
+    return " ".join(re.findall(r"[a-z0-9]+", normalized))
+
+
 class FoodDataService:
-    def __init__(self, json_path: str) -> None:
+    def __init__(self, json_path: str, tkpi_path: str | None = None) -> None:
         self._by_id: Dict[int, NutritionEntry] = {}
+        self._tkpi_by_code: Dict[str, NutritionEntry] = {}
         self._total_loaded = 0
 
         logger.info(f"Memuat FoodData Central dari: {json_path}")
         self._load(json_path)
+        if tkpi_path and os.path.exists(tkpi_path):
+            self._load_tkpi(tkpi_path)
         logger.info(
             f"FoodData dimuat: {self._total_loaded} makanan terindex. "
             f"Ukuran index: {len(self._by_id)} entries."
         )
+
+    def _load_tkpi(self, csv_path: str) -> None:
+        """Load only app-relevant TKPI columns; source CSV remains untouched."""
+        relevant = {
+            "energi_kkal": "kcal", "protein_g": "protein_g", "lemak_g": "fat_g",
+            "karbohidrat_g": "carbs_g", "serat_g": "fiber_g",
+        }
+        with open(csv_path, encoding="utf-8-sig", newline="") as stream:
+            for row in csv.DictReader(stream):
+                code = str(row.get("kode") or "").strip()
+                name = str(row.get("nama_bahan") or "").strip()
+                if not code or not name:
+                    continue
+                entry: NutritionEntry = {
+                    "tkpiCode": code,
+                    "description": name,
+                    "dataSource": "TKPI 2020",
+                    "sourceReference": str(row.get("sumber") or "").strip(),
+                    "category": str(row.get("kategori") or "").strip(),
+                    "bdd_percent": float(row.get("bdd_persen") or 100),
+                    # TKPI 2020 does not contain total sugar. It is completed
+                    # conservatively below only for clearly sweet foods.
+                    "sugar_g": 0.0,
+                }
+                valid = True
+                for source_key, target_key in relevant.items():
+                    try:
+                        entry[target_key] = float(row.get(source_key) or 0)
+                    except (TypeError, ValueError):
+                        valid = False
+                        break
+                if valid:
+                    self._tkpi_by_code[code] = self._complete_missing_nutrients(entry)
+
+    @staticmethod
+    def _complete_missing_nutrients(entry: NutritionEntry) -> NutritionEntry:
+        """Avoid false zero sugar when the source has no sugar column."""
+        name = _normalize_name(str(entry.get("description") or ""))
+        carbs = float(entry.get("carbs_g") or 0)
+        sugar = float(entry.get("sugar_g") or 0)
+        if sugar <= 0 and any(term in name for term in _SWEET_FOOD_TERMS):
+            entry["sugar_g"] = round(min(carbs, carbs * 0.85), 2)
+            entry["sugarEstimated"] = True
+        return entry
 
     def _load(self, json_path: str) -> None:
         with open(json_path, "r", encoding="utf-8") as f:
@@ -140,6 +222,29 @@ class FoodDataService:
 
         return sorted_matches[:max_results]
 
+    def search_tkpi_by_name(self, query: str, max_results: int = 10) -> List[NutritionEntry]:
+        normalized = _normalize_name(query)
+        translated = _TKPI_ALIASES.get(normalized, normalized)
+        words = [word for word in translated.split() if len(word) >= 2]
+        if not words:
+            return []
+        matches: list[tuple[int, int, NutritionEntry]] = []
+        for entry in self._tkpi_by_code.values():
+            description = _normalize_name(str(entry["description"]))
+            if all(word in description for word in words):
+                exact_rank = 0 if description == translated else 1 if description.startswith(translated) else 2
+                matches.append((exact_rank, len(description), entry))
+        return [entry for _, _, entry in sorted(matches, key=lambda item: (item[0], item[1]))[:max_results]]
+
+    def resolve_by_name(self, query: str) -> Optional[NutritionEntry]:
+        """Prefer an exact/local TKPI match, otherwise use USDA Foundation."""
+        tkpi = self.search_tkpi_by_name(query, max_results=1)
+        usda = self.search_by_name(query, max_results=1)
+        normalized = _normalize_name(query)
+        if tkpi and (_TKPI_ALIASES.get(normalized) or _normalize_name(str(tkpi[0]["description"])) == normalized):
+            return tkpi[0]
+        return usda[0] if usda else (tkpi[0] if tkpi else None)
+
     def calculate_nutrition_for_meal(
         self, ingredients: List[Dict]
     ) -> Dict[str, float]:
@@ -166,14 +271,19 @@ class FoodDataService:
 
         for item in ingredients:
             fdc_id = item.get("fdcId")
+            tkpi_code = item.get("tkpiCode")
             weight_g = float(item.get("weight_g", 0))
 
-            if not fdc_id or weight_g <= 0:
+            if weight_g <= 0:
                 continue
 
-            entry = self.lookup_by_fdc_id(int(fdc_id))
+            entry = self._tkpi_by_code.get(str(tkpi_code)) if tkpi_code else None
+            if entry is None and fdc_id:
+                entry = self.lookup_by_fdc_id(int(fdc_id))
+            if entry is None and item.get("nutrition_per_100g"):
+                entry = dict(item["nutrition_per_100g"])
             if not entry:
-                logger.warning(f"fdcId {fdc_id} tidak ditemukan di FoodData index")
+                logger.warning("Ground truth nutrisi tidak ditemukan untuk %s", item.get("ingredient"))
                 continue
 
             # Faktor konversi: data per 100g → per weight_g
@@ -215,6 +325,7 @@ def get_food_data_service() -> FoodDataService:
     # Tentukan path file JSON relatif ke root project
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     json_path = os.path.join(base_dir, "app", "data", "FoodData_Central_foundation_food_json_2026-04-30.json")
+    tkpi_path = os.path.join(base_dir, "app", "data", "TKPI_2020_food_composition.csv")
 
     if not os.path.exists(json_path):
         logger.error(
@@ -226,7 +337,7 @@ def get_food_data_service() -> FoodDataService:
         _instance = _EmptyFoodDataService()  # type: ignore
         return _instance
 
-    _instance = FoodDataService(json_path)
+    _instance = FoodDataService(json_path, tkpi_path)
     return _instance
 
 
@@ -240,6 +351,7 @@ class _EmptyFoodDataService(FoodDataService):
     def __init__(self) -> None:
         # Tidak memanggil super().__init__ agar tidak crash saat file tidak ada
         self._by_id = {}
+        self._tkpi_by_code = {}
         self._by_name = {}
         self._total_loaded = 0
         logger.warning("FoodDataService berjalan dalam mode KOSONG — file JSON tidak ditemukan")

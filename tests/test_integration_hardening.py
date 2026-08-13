@@ -118,6 +118,7 @@ async def test_food_confirmation_uses_single_atomic_rpc(monkeypatch):
 
     assert client.rpc_call["p_analysis_type"] == "food"
     assert client.rpc_call["p_portion_grams"] == 150
+    assert client.rpc_call["p_nutrition"] == {"kcal": 180.0, "sugar_g": 6.0}
     assert result["history"]["type"] == "food"
     assert result["streakDays"] == 1
 

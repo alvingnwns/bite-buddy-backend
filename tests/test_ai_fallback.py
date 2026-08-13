@@ -11,7 +11,12 @@ class FakeOpenRouter:
         return {
             "is_food": True,
             "food_name": "Ice cream",
-            "ingredients": [{"name": "ice cream", "weight_g": 90}],
+            "ingredients": [{
+                "name": "ice cream", "weight_g": 90, "kcal_per_100g": 210,
+                "protein_g_per_100g": 4, "fat_g_per_100g": 12.5,
+                "carbs_g_per_100g": 20.6, "sugar_g_per_100g": 17.5,
+                "fiber_g_per_100g": 0,
+            }],
         }
 
 
@@ -30,6 +35,10 @@ def test_food_analysis_uses_qwen_when_gemini_fails(monkeypatch):
     assert is_food is True
     assert food_name == "Ice cream"
     assert ingredients[0]["ingredient"] == "ice cream"
+    nutrition = service.food_data_service.calculate_nutrition_for_meal(ingredients)
+    assert ingredients[0]["dataSource"] == "TKPI 2020"
+    assert ingredients[0]["sugarEstimated"] is True
+    assert nutrition["sugar_g"] > 0
 
 
 def test_nutrition_evaluation_uses_qwen_when_gemini_fails(monkeypatch):
