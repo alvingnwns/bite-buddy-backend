@@ -209,9 +209,9 @@ def register(req: RegisterRequest, request: Request) -> dict[str, Any]:
         if not doctor.data:
             raise api_error(400, "invalid_doctor_code", "Doctor code is invalid.", {"fields": {"doctorCode": ["Invalid or inactive code."]}})
         doctor_id = str(doctor.data[0]["id"])
-        existing_code = client.table("users").select("id").eq("patient_code", req.patient_code).execute()
-        if existing_code.data:
-            raise api_error(409, "patient_code_conflict", "Patient code is already registered.")
+        invitation = client.table("patient_invitations").select("id").ilike("patient_code", req.patient_code.strip()).eq("doctor_id", doctor_id).eq("status", "pending").execute()
+        if not invitation.data:
+            raise api_error(400, "invalid_patient_code", "Patient code is invalid or unavailable.", {"fields": {"patientCode": ["Invalid, expired, or already claimed code."]}})
     elif req.role == UserRole.doctor:
         duplicate = client.table("users").select("id").ilike("doctor_code", doctor_code).execute()
         if duplicate.data:
@@ -228,28 +228,39 @@ def register(req: RegisterRequest, request: Request) -> dict[str, Any]:
             "user_metadata": {"username": username, "role": req.role.value},
         })
         created_user_id = str(auth_response.user.id)
-        user_data = {
-            "id": created_user_id,
-            "email": f"{username}@bitebuddy.com",
-            "username": username,
-            "full_name": (req.full_name or username).strip(),
-            "role": req.role.value,
-            "doctor_id": doctor_id,
-            "doctor_code": doctor_code if req.role == UserRole.doctor else None,
-            "patient_code": req.patient_code if req.role == UserRole.child else None,
-            "birth_date": req.birthdate.isoformat() if req.birthdate else None,
-            "gender": req.gender.value if req.gender else None,
-            "address": (req.address or "").strip() or None,
-            "is_active": True,
-            "password_hash": "supabase_managed",
-        }
-        inserted = client.table("users").insert(user_data).execute()
-        if not inserted.data:
-            raise RuntimeError("Profile insert failed")
         if req.role == UserRole.child:
+            claimed = client.rpc("claim_patient_invitation", {
+                "p_auth_user_id": created_user_id,
+                "p_email": f"{username}@bitebuddy.com",
+                "p_username": username,
+                "p_password_hash": "supabase_managed",
+                "p_doctor_code": doctor_code,
+                "p_patient_code": req.patient_code.strip(),
+            }).execute()
+            if not claimed.data:
+                raise RuntimeError("Invitation claim failed")
             client.table("virtual_pets").insert({
                 "child_id": created_user_id, "pet_name": "Buddy", "pet_type": "dog"
             }).execute()
+        else:
+            user_data = {
+                "id": created_user_id,
+                "email": f"{username}@bitebuddy.com",
+                "username": username,
+                "full_name": (req.full_name or username).strip(),
+                "role": req.role.value,
+                "doctor_id": doctor_id,
+                "doctor_code": doctor_code if req.role == UserRole.doctor else None,
+                "patient_code": None,
+                "birth_date": req.birthdate.isoformat() if req.birthdate else None,
+                "gender": req.gender.value if req.gender else None,
+                "address": (req.address or "").strip() or None,
+                "is_active": True,
+                "password_hash": "supabase_managed",
+            }
+            inserted = client.table("users").insert(user_data).execute()
+            if not inserted.data:
+                raise RuntimeError("Profile insert failed")
     except Exception:
         if created_user_id:
             try:

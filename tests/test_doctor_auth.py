@@ -278,3 +278,65 @@ def test_require_doctor_rejects_non_doctor():
         assert error.status_code == 403
     else:
         raise AssertionError("Parent identity must not pass require_doctor.")
+
+
+class ChildRegistrationQuery:
+    def __init__(self, client, table):
+        self.client = client
+        self.name = table
+        self.filters = {}
+        self.inserted = None
+
+    def select(self, *_args): return self
+    def eq(self, field, value): self.filters[field] = value; return self
+    def ilike(self, field, value): self.filters[field] = str(value).lower(); return self
+    def insert(self, value): self.inserted = value; return self
+
+    def execute(self):
+        if self.inserted is not None:
+            self.client.pet = self.inserted
+            return SimpleNamespace(data=[self.inserted])
+        if self.name == "users":
+            return SimpleNamespace(data=[{"id": DOCTOR_ID}])
+        if self.name == "patient_invitations":
+            return SimpleNamespace(data=[{"id": "invitation-1"}])
+        return SimpleNamespace(data=[])
+
+
+class ChildRegistrationAdmin:
+    def create_user(self, _payload):
+        return SimpleNamespace(user=SimpleNamespace(id="00000000-0000-0000-0000-000000000020"))
+
+    def delete_user(self, _user_id):
+        return None
+
+
+class ChildRegistrationClient:
+    def __init__(self):
+        self.auth = SimpleNamespace(admin=ChildRegistrationAdmin())
+        self.rpc_args = None
+        self.pet = None
+
+    def table(self, name):
+        return ChildRegistrationQuery(self, name)
+
+    def rpc(self, name, args):
+        assert name == "claim_patient_invitation"
+        self.rpc_args = args
+        return SimpleNamespace(execute=lambda: SimpleNamespace(data="invitation-1"))
+
+
+def test_child_registration_claims_pending_invitation_atomically(monkeypatch):
+    client = ChildRegistrationClient()
+    monkeypatch.setattr(auth_api, "get_supabase_service_client", lambda: client)
+    monkeypatch.setattr(auth_api, "record_activity", lambda **_kwargs: None)
+
+    response = TestClient(app).post("/api/v1/auth/register", json={
+        "username": "childuser", "password": "childpass123", "role": "child",
+        "doctorCode": "D0987", "patientCode": "P123456",
+    })
+
+    assert response.status_code == 201
+    assert client.rpc_args["p_doctor_code"] == "D0987"
+    assert client.rpc_args["p_patient_code"] == "P123456"
+    assert client.pet["child_id"] == response.json()["childId"]
