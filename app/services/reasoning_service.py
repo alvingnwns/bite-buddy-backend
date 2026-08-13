@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.services.food_data_service import get_food_data_service
+from app.services.openrouter_service import OpenRouterService
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ class ReasoningService:
         self.food_data_service = get_food_data_service()
         self.api_key = settings.gemini_api_key
         self.nutrition_model_name = getattr(settings, "gemini_nutrition_model", "gemini-3.5-flash")
+        self.openrouter = OpenRouterService()
 
     def calculate_totals(self, confirmed_ingredients: List[Dict[str, Any]]) -> Dict[str, float]:
         """
@@ -41,58 +43,52 @@ class ReasoningService:
         Menggunakan Gemini API untuk mengevaluasi apakah total nutrisi meal ini 
         tergolong sehat (khususnya konteks diabetes anak).
         """
-        if not self.api_key:
-            logger.warning("Menggunakan MOCK untuk evaluasi nutrisi.")
-            return {
-                "is_healthy": totals.get("sugar_g", 0) < 15,
-                "health_score": 80,
-                "explanation": "Evaluasi Mock: Makanan ini tergolong cukup baik (Mock Data)."
-            }
+        ingredients_text = ", ".join([
+            f"{item.get('description', item.get('ingredient', 'Unknown'))} ({item.get('weight_g', 0)}g)"
+            for item in confirmed_ingredients
+        ])
+        prompt = (
+            "You are an expert pediatric nutritionist specializing in Type 1 Diabetes. "
+            "Analyze only the supplied meal; do not invent ingredients or clinical facts.\n"
+            f"Ingredients: {ingredients_text}\n"
+            f"Total Calories: {totals.get('kcal', 0)} kcal\n"
+            f"Total Carbs: {totals.get('carbs_g', 0)} g\n"
+            f"Total Sugar: {totals.get('sugar_g', 0)} g\n"
+            f"Total Protein: {totals.get('protein_g', 0)} g\n"
+            f"Total Fat: {totals.get('fat_g', 0)} g\n"
+            f"Total Fiber: {totals.get('fiber_g', 0)} g\n\n"
+            "Return only JSON containing boolean is_healthy, integer health_score (0-100), "
+            "and a short Indonesian explanation suitable for a child and parent."
+        )
 
-        try:
-            model = genai.GenerativeModel(self.nutrition_model_name)
-            
-            # Format data untuk dianalisis oleh model
-            ingredients_text = ", ".join([
-                f"{item.get('description', item.get('ingredient', 'Unknown'))} ({item.get('weight_g', 0)}g)" 
-                for item in confirmed_ingredients
-            ])
-            
-            prompt = (
-                "You are an expert pediatric nutritionist specializing in Type 1 Diabetes. "
-                "Analyze the following meal based on its total macronutrients and ingredients.\n"
-                f"Ingredients: {ingredients_text}\n"
-                f"Total Calories: {totals.get('kcal', 0)} kcal\n"
-                f"Total Carbs: {totals.get('carbs_g', 0)} g\n"
-                f"Total Sugar: {totals.get('sugar_g', 0)} g\n"
-                f"Total Protein: {totals.get('protein_g', 0)} g\n"
-                f"Total Fat: {totals.get('fat_g', 0)} g\n"
-                f"Total Fiber: {totals.get('fiber_g', 0)} g\n\n"
-                "Provide an evaluation in JSON format containing boolean 'is_healthy', an integer 'health_score' (0-100), "
-                "and a short 'explanation' in Indonesian on why it is or isn't healthy for a child."
-            )
-            
-            response = await model.generate_content_async(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    response_mime_type="application/json",
-                    response_schema=MealEvaluation,
-                    temperature=0.3,
-                ),
-            )
-            
-            evaluation = json.loads(response.text)
-            return evaluation
+        if self.api_key:
+            try:
+                model = genai.GenerativeModel(self.nutrition_model_name)
+                response = await model.generate_content_async(
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        response_mime_type="application/json",
+                        response_schema=MealEvaluation,
+                        temperature=0.3,
+                    ),
+                )
+                return MealEvaluation.model_validate_json(response.text).model_dump()
+            except Exception:
+                logger.warning("Gemini meal evaluation failed; trying Qwen fallback", exc_info=True)
 
-        except Exception as e:
-            logger.error(f"Error pada Gemini Meal Evaluation: {str(e)}")
-            # Fallback ke evaluasi algoritmik sederhana jika AI gagal
-            is_healthy = totals.get("sugar_g", 0) < 15 and totals.get("fiber_g", 0) > 2
-            return {
-                "is_healthy": is_healthy,
-                "health_score": 70 if is_healthy else 40,
-                "explanation": "Evaluasi AI sedang tidak tersedia. (Fallback Algoritma)"
-            }
+        if self.openrouter.configured:
+            try:
+                raw = await self.openrouter.complete_json(prompt, temperature=0.3)
+                return MealEvaluation.model_validate(raw).model_dump()
+            except Exception:
+                logger.exception("Qwen meal evaluation fallback failed")
+
+        is_healthy = totals.get("sugar_g", 0) < 15 and totals.get("fiber_g", 0) > 2
+        return {
+            "is_healthy": is_healthy,
+            "health_score": 70 if is_healthy else 40,
+            "explanation": "Evaluasi AI sedang tidak tersedia; penilaian sementara memakai batas gula dan serat.",
+        }
 
     async def process_confirmed_meal(self, confirmed_ingredients: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -118,4 +114,3 @@ class ReasoningService:
             "explanation": evaluation.get("explanation", ""),
             "ingredients_detail": confirmed_ingredients
         }
-

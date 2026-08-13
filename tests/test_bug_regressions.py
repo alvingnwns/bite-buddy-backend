@@ -83,3 +83,26 @@ def test_food_progression_migration_wraps_atomic_confirmation():
     assert "v_hp_delta := CASE WHEN p_is_healthy THEN 5 ELSE -15 END" in sql
     assert "v_threshold := (100 * v_level) + 150" in sql
     assert "recipient_user_id" in sql
+
+
+def test_pet_progression_is_idempotent_and_medicine_does_not_change_pet():
+    sql = open("migrations/018_pet_progression_idempotency.sql", encoding="utf-8").read()
+    assert "FOR UPDATE" in sql
+    assert "v_draft.status = 'confirmed'" in sql
+    assert "confirm_child_analysis_legacy" in sql
+    assert "p_analysis_type = 'medicine'" in sql
+    assert "experience_points = v_previous_exp" in sql
+    assert "recipient_user_id = p_child_id" in sql
+
+
+def test_medicine_confirmation_has_no_python_pet_reward(monkeypatch):
+    service = GamificationService()
+    captured = {}
+
+    def update(_child_id, exp_delta, happiness_delta, hunger_delta):
+        captured.update(exp=exp_delta, happiness=happiness_delta, hunger=hunger_delta)
+        return captured
+
+    monkeypatch.setattr(service, "update_pet_status", update)
+    service.evaluate_medicine_compliance(CHILD_ID)
+    assert captured == {"exp": 0, "happiness": 0, "hunger": 0}

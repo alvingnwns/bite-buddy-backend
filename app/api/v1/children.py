@@ -144,6 +144,11 @@ async def analyze_food(file: UploadFile = File(...), identity: dict[str, Any] = 
         "child_id": identity["id"], "analysis_type": "food", "payload": payload,
         "image_url": public_url, "status": "draft",
     }).execute().data[0]
+    record_activity(
+        actor_id=identity["id"], actor_role="child", action="food_analysis.create",
+        target_type="analysis_draft", target_id=str(inserted["id"]), child_id=identity["id"],
+        description="Analyzed a food image.",
+    )
     return _food_draft(inserted)
 
 
@@ -247,6 +252,11 @@ async def analyze_medicine(file: UploadFile = File(...), identity: dict[str, Any
         "child_id": identity["id"], "analysis_type": "medicine", "payload": {"detected": detected, "isMedicine": is_medicine},
         "image_url": public_url, "status": "awaiting_confirmation" if is_medicine else "failed",
     }).execute().data[0]
+    record_activity(
+        actor_id=identity["id"], actor_role="child", action="medicine_analysis.create",
+        target_type="analysis_draft", target_id=str(inserted["id"]), child_id=identity["id"],
+        description="Analyzed a medicine image.",
+    )
     if not is_medicine:
         get_supabase_service_client().table("medication_logs").insert({
             "child_id": identity["id"], "administered_by": identity["id"], "medication_name": "Not medicine",

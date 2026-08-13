@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     gemini_nutrition_model: str = "gemini-3.5-flash"  # Untuk estimasi kalori & makronutrien
     gemini_doctor_model: str = "gemini-3.5-flash"     # Ringkasan klinis Doctor
 
+    # OpenRouter Qwen fallback. QWEN_FALLBACK contains the OpenRouter API key.
+    qwen_fallback: str = ""
+    qwen_fallback_model: str = "qwen/qwen3-vl-8b-instruct"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+
     @field_validator("debug", mode="before")
     @classmethod
     def normalize_debug_mode(cls, value: object) -> object:

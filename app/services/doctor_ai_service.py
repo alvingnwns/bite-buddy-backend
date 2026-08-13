@@ -8,6 +8,7 @@ import google.generativeai as genai
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
+from app.services.openrouter_service import OpenRouterService
 
 logger = logging.getLogger(__name__)
 
@@ -33,26 +34,35 @@ DOCTOR_SUMMARY_PROVIDER_SCHEMA = {
 
 async def generate_doctor_summary(source: dict[str, Any]) -> DoctorSummary:
     """Generate decision support from authorized data without dummy fallbacks."""
-    if not settings.gemini_api_key:
+    fallback = OpenRouterService()
+    if not settings.gemini_api_key and not fallback.configured:
         raise DoctorAiUnavailable("AI provider is not configured.")
+    prompt = (
+        "You support a pediatric diabetes doctor. Summarize only the supplied "
+        "patient data. Do not diagnose, invent facts, or mention other patients. "
+        "Return only JSON with a concise overview and an insights array containing "
+        "1-8 actionable items.\n\n"
+        f"Authorized patient data:\n{json.dumps(source, ensure_ascii=False, default=str)}"
+    )
+    if settings.gemini_api_key:
+        try:
+            genai.configure(api_key=settings.gemini_api_key)
+            model = genai.GenerativeModel(settings.gemini_doctor_model)
+            response = await model.generate_content_async(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    response_mime_type="application/json",
+                    response_schema=DOCTOR_SUMMARY_PROVIDER_SCHEMA,
+                    temperature=0.2,
+                ),
+            )
+            return DoctorSummary.model_validate_json(response.text)
+        except Exception:
+            logger.warning("Gemini doctor summary failed; trying Qwen fallback", exc_info=True)
     try:
-        genai.configure(api_key=settings.gemini_api_key)
-        model = genai.GenerativeModel(settings.gemini_doctor_model)
-        response = await model.generate_content_async(
-            "You support a pediatric diabetes doctor. Summarize only the supplied "
-            "patient data. Do not diagnose, invent facts, or mention other patients. "
-            "Return a concise overview and 1-8 actionable insights.\n\n"
-            f"Authorized patient data:\n{json.dumps(source, ensure_ascii=False, default=str)}",
-            generation_config=genai.types.GenerationConfig(
-                response_mime_type="application/json",
-                # The legacy Gemini SDK rejects Pydantic's maxLength/maxItems
-                # keywords. Keep provider schema compatible and enforce all
-                # bounds locally with DoctorSummary validation below.
-                response_schema=DOCTOR_SUMMARY_PROVIDER_SCHEMA,
-                temperature=0.2,
-            ),
+        return DoctorSummary.model_validate(
+            await fallback.complete_json(prompt, temperature=0.2)
         )
-        return DoctorSummary.model_validate_json(response.text)
     except Exception as exc:
-        logger.exception("Doctor AI provider request failed")
+        logger.exception("All doctor AI providers failed")
         raise DoctorAiUnavailable("AI provider request failed.") from exc

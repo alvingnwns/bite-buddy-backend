@@ -12,6 +12,7 @@ from app.services.gamification_service import GamificationService
 from app.services.log_service import LogService
 from app.services.reasoning_service import ReasoningService
 from app.services.storage_service import StorageService
+from app.services.activity_service import record_activity
 
 router = APIRouter(prefix="/scan", tags=["scan"])
 
@@ -121,6 +122,11 @@ async def confirm_food(
     pet_status_update = gamification_service.evaluate_food_compliance(
         child_id=request.child_id, total_calories=total_calories, is_healthy=is_healthy
     )
+    record_activity(
+        actor_id=str(request.logged_by), actor_role="child", action="food.confirm",
+        target_type="food_log", target_id=str(db_record.get("id")) if isinstance(db_record, dict) else None,
+        child_id=str(request.child_id), description="Confirmed food scan.",
+    )
 
     return {
         "status": "success",
@@ -180,6 +186,11 @@ async def scan_medicine(
 
     # Gamification
     pet_status_update = gamification_service.evaluate_medicine_compliance(child_id=child_id)
+    record_activity(
+        actor_id=str(administered_by), actor_role="child", action="medicine.confirm",
+        target_type="medication_log", target_id=str(db_record.get("id")) if isinstance(db_record, dict) else None,
+        child_id=str(child_id), description="Confirmed medicine scan.",
+    )
 
     return {
         "status": "success",

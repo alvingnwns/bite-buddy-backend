@@ -101,14 +101,10 @@ class GamificationService:
         return self.update_pet_status(child_id, exp_delta, happiness_delta, hunger_delta)
 
     def evaluate_medicine_compliance(self, child_id: UUID) -> Dict[str, Any]:
-        """Evaluasi kepatuhan minum/suntik obat.
-
-        Minum obat = reward terbesar karena sangat penting untuk T1DM.
-        Obat tidak mempengaruhi hunger (tidak mengenyangkan).
-        """
-        exp_delta = 20
-        happiness_delta = 15
-        hunger_delta = 0    # obat tidak mengenyangkan
+        """Catat kepatuhan obat tanpa mengubah XP/HP pet."""
+        exp_delta = 0
+        happiness_delta = 0
+        hunger_delta = 0
 
         return self.update_pet_status(child_id, exp_delta, happiness_delta, hunger_delta)
 
