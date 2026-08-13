@@ -133,6 +133,16 @@ def _clean_instructions(values: list[str]) -> list[str]:
     return [value.strip() for value in values if value.strip()]
 
 
+def _sync_medication_schedules(
+    child_id: str, doctor_id: str, instructions: list[str]
+) -> None:
+    get_supabase_service_client().rpc("sync_doctor_medication_schedules", {
+        "p_child_id": child_id,
+        "p_doctor_id": doctor_id,
+        "p_instructions": instructions,
+    }).execute()
+
+
 def _avatar(gender: str, birthdate: str | None) -> str:
     today = datetime.now(ZoneInfo("Asia/Jakarta")).date()
     try:
@@ -432,9 +442,14 @@ def update_patient(req: PatientUpdate, patient_id: str, request: Request, doctor
                 raise api_error(409, "clinical_profile_incomplete", "Height and weight are both required for this patient.")
         profile_update = {}
         if "medical_history" in values: profile_update["medical_history"] = values["medical_history"].strip()
-        if "medication_schedule" in values: profile_update["medication_instructions"] = _clean_instructions(values["medication_schedule"])
+        medication_instructions = None
+        if "medication_schedule" in values:
+            medication_instructions = _clean_instructions(values["medication_schedule"])
+            profile_update["medication_instructions"] = medication_instructions
         if profile_update:
             client.table("doctor_patient_profiles").upsert({"patient_id": patient_id, "doctor_id": doctor["id"], **profile_update}, on_conflict="patient_id").execute()
+        if medication_instructions is not None:
+            _sync_medication_schedules(patient_id, doctor["id"], medication_instructions)
     _, detail = _patient_detail(doctor["id"], patient_id)
     record_activity(actor_id=doctor["id"], actor_role="doctor", action="doctor.patient.update", target_type="patient", target_id=patient_id, description="Updated patient profile.", request_id=request.state.request_id, metadata={"changed_fields": sorted(req.model_fields_set)})
     return detail

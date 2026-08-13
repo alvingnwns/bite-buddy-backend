@@ -1,4 +1,5 @@
 import asyncio
+from datetime import date
 from io import BytesIO
 from types import SimpleNamespace
 
@@ -8,6 +9,7 @@ from starlette.datastructures import Headers
 
 from app.api.v1 import children, parents
 from app.services.gamification_service import GamificationService
+from app.services.integration_service import _schedule_occurs_on
 
 
 CHILD_ID = "00000000-0000-0000-0000-000000000020"
@@ -74,6 +76,12 @@ def test_level_progression_uses_level_aware_threshold_and_reward():
     assert GamificationService.xp_gain(2) == 23
 
 
+def test_medium_sugar_is_healthy_and_high_sugar_is_not():
+    assert children._is_healthy_sugar(5)
+    assert children._is_healthy_sugar(14.99)
+    assert not children._is_healthy_sugar(15)
+
+
 def test_food_progression_migration_wraps_atomic_confirmation():
     sql = open(
         "migrations/017_food_analysis_corrections_pet_progression.sql",
@@ -93,6 +101,35 @@ def test_pet_progression_is_idempotent_and_medicine_does_not_change_pet():
     assert "p_analysis_type = 'medicine'" in sql
     assert "experience_points = v_previous_exp" in sql
     assert "recipient_user_id = p_child_id" in sql
+
+
+def test_unhealthy_food_does_not_receive_xp():
+    sql = open("migrations/019_healthy_food_xp_rule.sql", encoding="utf-8").read()
+    assert "p_analysis_type = 'food' AND NOT p_is_healthy" in sql
+    assert "experience_points = v_previous_exp" in sql
+    assert "the -15 HP and warning created by the wrapped function remain unchanged" in sql
+
+
+def test_doctor_medication_recurrence_is_visible_on_correct_dates():
+    anchor = date(2026, 8, 14)
+    base = {
+        "schedule_type": "medicine",
+        "day_of_week": anchor.weekday(),
+        "recurrence_anchor_date": anchor.isoformat(),
+    }
+    assert _schedule_occurs_on({**base, "recurrence_type": "everyday"}, date(2026, 8, 15))
+    assert _schedule_occurs_on({**base, "recurrence_type": "every_x_days", "recurrence_interval_days": 3}, date(2026, 8, 17))
+    assert not _schedule_occurs_on({**base, "recurrence_type": "every_x_days", "recurrence_interval_days": 3}, date(2026, 8, 16))
+    assert _schedule_occurs_on({**base, "recurrence_type": "once_a_week"}, date(2026, 8, 21))
+    assert _schedule_occurs_on({**base, "recurrence_type": "once_a_month"}, date(2026, 9, 14))
+
+
+def test_migration_materializes_and_backfills_doctor_medication_schedules():
+    sql = open("migrations/020_doctor_medication_schedules.sql", encoding="utf-8").read()
+    assert "sync_doctor_medication_schedules" in sql
+    assert "managed_by_doctor" in sql
+    assert "claim_patient_invitation_v012" in sql
+    assert "Backfill schedules" in sql
 
 
 def test_medicine_confirmation_has_no_python_pet_reward(monkeypatch):

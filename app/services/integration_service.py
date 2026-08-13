@@ -65,13 +65,37 @@ def _time_text(value: Any) -> str:
     return str(value or "")[:5]
 
 
+def _schedule_occurs_on(row: dict[str, Any], day: date) -> bool:
+    recurrence = row.get("recurrence_type")
+    if row.get("schedule_type") != "medicine" or not recurrence:
+        return int(row.get("day_of_week", -1)) == day.weekday()
+    anchor_text = row.get("recurrence_anchor_date") or row.get("start_date")
+    try:
+        anchor = date.fromisoformat(str(anchor_text))
+    except (TypeError, ValueError):
+        return int(row.get("day_of_week", -1)) == day.weekday()
+    if day < anchor:
+        return False
+    elapsed = (day - anchor).days
+    if recurrence == "everyday":
+        return True
+    if recurrence == "every_x_days":
+        return elapsed % max(1, int(row.get("recurrence_interval_days") or 1)) == 0
+    if recurrence == "once_a_week":
+        return elapsed % 7 == 0
+    if recurrence == "once_a_month":
+        return day.day == anchor.day
+    return False
+
+
 def schedules(child_id: str, target_date: date | None = None) -> dict[str, Any]:
     day = target_date or wib_today()
     rows = (
         get_supabase_service_client().table("custom_meal_schedules")
         .select("*").eq("child_id", child_id).eq("is_active", True)
-        .eq("day_of_week", day.weekday()).execute().data or []
+        .execute().data or []
     )
+    rows = [row for row in rows if _schedule_occurs_on(row, day)]
     occurrences = (
         get_supabase_service_client().table("schedule_occurrences")
         .select("schedule_id,status").eq("child_id", child_id)

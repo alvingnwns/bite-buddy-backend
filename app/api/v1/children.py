@@ -37,6 +37,11 @@ class ConfirmFoodRequest(CamelModel):
     sugar_amount_grams: float | None = None
 
 
+def _is_healthy_sugar(sugar_grams: float) -> bool:
+    """Low and medium sugar foods earn the healthy-food reward."""
+    return sugar_grams < 15
+
+
 def _profile(child_id: str) -> dict[str, Any]:
     client = get_supabase_service_client()
     response = client.table("users").select("*").eq("id", child_id).single().execute()
@@ -227,7 +232,7 @@ async def confirm_food(analysis_id: str, req: ConfirmFoodRequest, identity: dict
         payload["nutrition"] = nutrition
         client.table("analysis_drafts").update({"payload": payload}).eq("id", analysis_id).eq("child_id", identity["id"]).execute()
         record_activity(actor_id=identity["id"], actor_role="child", action="food_analysis.update", target_type="analysis_draft", target_id=analysis_id, child_id=identity["id"], description="Corrected food analysis before confirmation.")
-    is_healthy = float(nutrition.get("sugar_g", 0)) < 15
+    is_healthy = _is_healthy_sugar(float(nutrition.get("sugar_g", 0)))
     try:
         result = client.rpc("confirm_child_analysis", {
             "p_child_id": identity["id"], "p_analysis_id": analysis_id,

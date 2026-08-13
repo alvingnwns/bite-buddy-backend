@@ -163,3 +163,29 @@ def test_doctor_updates_owned_pending_profile(monkeypatch):
     assert response.status_code == 200
     assert response.json()["profile"]["fullName"] == "Updated Patient"
     assert client.tables["patient_invitations"][0]["medication_instructions"] == ["08:00"]
+
+
+def test_doctor_update_syncs_claimed_medication_schedule(monkeypatch):
+    setup_client(monkeypatch)
+    captured = {}
+    monkeypatch.setattr(
+        doctors,
+        "_sync_medication_schedules",
+        lambda child_id, doctor_id, instructions: captured.update(
+            child_id=child_id, doctor_id=doctor_id, instructions=instructions
+        ),
+    )
+    try:
+        response = TestClient(app).patch(
+            f"/api/v1/doctors/me/patients/{PATIENT_ID}",
+            json={"medicationSchedule": [" 07:00 | everyday ", ""]},
+        )
+    finally:
+        teardown()
+
+    assert response.status_code == 200
+    assert captured == {
+        "child_id": PATIENT_ID,
+        "doctor_id": DOCTOR_ID,
+        "instructions": ["07:00 | everyday"],
+    }
