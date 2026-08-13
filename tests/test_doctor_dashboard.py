@@ -84,6 +84,34 @@ class FakeClient:
 
     def table(self, name): return Query(self, name)
 
+    def rpc(self, name, params):
+        now = datetime.now(timezone.utc).isoformat()
+        if name == "doctor_create_blood_glucose":
+            row = {
+                "id": "g-created", "patient_id": params["p_patient_id"],
+                "value_mg_dl": params["p_value_mg_dl"],
+                "recorded_at": params["p_recorded_at"], "created_at": now,
+            }
+        elif name == "doctor_create_appointment":
+            row = {
+                "id": "a-created", "patient_id": params["p_patient_id"],
+                "title": params["p_title"], "starts_at": params["p_starts_at"],
+                "status": "scheduled", "created_at": now,
+            }
+        elif name == "doctor_create_diagnosis":
+            row = {
+                "id": "d-created", "patient_id": params["p_patient_id"],
+                "doctor_id": params["p_doctor_id"],
+                "chief_complaint": params["p_chief_complaint"],
+                "medical_diagnosis": params["p_medical_diagnosis"],
+                "therapy": params["p_therapy"], "price_amount": params["p_price_amount"],
+                "currency": params["p_currency"], "created_at": now,
+            }
+        else:
+            raise AssertionError(f"Unexpected RPC {name}")
+        self.last_rpc = (name, params)
+        return SimpleNamespace(execute=lambda: SimpleNamespace(data=row))
+
 
 def setup(monkeypatch):
     client = FakeClient()
@@ -101,6 +129,15 @@ def request(monkeypatch, path):
     finally:
         app.dependency_overrides.clear()
     return response, activities
+
+
+def mutation(monkeypatch, path, payload):
+    setup(monkeypatch)
+    try:
+        response = TestClient(app).post(path, json=payload)
+    finally:
+        app.dependency_overrides.clear()
+    return response
 
 
 def test_glucose_returns_latest_records_oldest_to_newest_and_audits(monkeypatch):
@@ -146,3 +183,61 @@ def test_clinical_reads_reject_cross_doctor_patient_without_audit(monkeypatch):
     assert response.json()["code"] == "forbidden"
     assert OTHER_PATIENT_ID not in response.text
     assert activities == []
+
+
+def test_doctor_creates_glucose_with_server_identity_and_utc_timestamps(monkeypatch):
+    response = mutation(monkeypatch, f"/api/v1/doctors/me/patients/{PATIENT_ID}/blood-glucose", {
+        "valueMgDl": 145.5, "recordedAt": "2026-08-13T12:00:00+07:00",
+    })
+    assert response.status_code == 201
+    assert response.json() == {
+        "id": "g-created", "patientId": PATIENT_ID, "valueMgDl": 145.5,
+        "recordedAt": "2026-08-13T05:00:00Z",
+        "createdAt": response.json()["createdAt"],
+    }
+    assert response.json()["createdAt"].endswith("Z")
+
+
+def test_doctor_schedules_canonical_appointment(monkeypatch):
+    response = mutation(monkeypatch, f"/api/v1/doctors/me/patients/{PATIENT_ID}/appointments", {
+        "title": "  Routine Check Up  ", "startsAt": "2026-08-20T10:00:00+07:00",
+    })
+    assert response.status_code == 201
+    assert response.json()["id"] == "a-created"
+    assert response.json()["title"] == "Routine Check Up"
+    assert response.json()["startsAt"] == "2026-08-20T03:00:00Z"
+    assert response.json()["status"] == "scheduled"
+
+
+def test_doctor_creates_diagnosis_without_implicit_patient_side_effects(monkeypatch):
+    response = mutation(monkeypatch, f"/api/v1/doctors/me/patients/{PATIENT_ID}/diagnoses", {
+        "chiefComplaint": "Fatigue", "medicalDiagnosis": "Diabetes Type I",
+        "therapy": "Continue treatment", "priceAmount": 100000, "currency": "IDR",
+    })
+    assert response.status_code == 201
+    assert response.json()["doctorId"] == DOCTOR_ID
+    assert response.json()["patientId"] == PATIENT_ID
+    assert response.json()["currency"] == "IDR"
+    assert response.json()["createdAt"].endswith("Z")
+
+
+def test_mutations_reject_server_owned_fields_and_naive_timestamps(monkeypatch):
+    owned = mutation(monkeypatch, f"/api/v1/doctors/me/patients/{PATIENT_ID}/diagnoses", {
+        "chiefComplaint": "Fatigue", "medicalDiagnosis": "Diagnosis", "therapy": "Therapy",
+        "priceAmount": 0, "currency": "IDR", "doctorId": "other-doctor",
+    })
+    naive = mutation(monkeypatch, f"/api/v1/doctors/me/patients/{PATIENT_ID}/blood-glucose", {
+        "valueMgDl": 100, "recordedAt": "2026-08-13T12:00:00",
+    })
+    assert owned.status_code == 422
+    assert "doctorId" in owned.json()["details"]["fields"]
+    assert naive.status_code == 422
+    assert "recordedAt" in naive.json()["details"]["fields"]
+
+
+def test_clinical_mutations_reject_cross_doctor_patient(monkeypatch):
+    response = mutation(monkeypatch, f"/api/v1/doctors/me/patients/{OTHER_PATIENT_ID}/appointments", {
+        "title": "Check Up", "startsAt": "2026-08-20T10:00:00+07:00",
+    })
+    assert response.status_code == 403
+    assert OTHER_PATIENT_ID not in response.text

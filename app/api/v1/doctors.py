@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import secrets
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query, Request
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from app.api.deps import require_doctor
 from app.api.errors import api_error
@@ -56,6 +56,58 @@ class PatientUpdate(CamelModel):
         if self.birthdate and self.birthdate > datetime.now(ZoneInfo("Asia/Jakarta")).date():
             raise ValueError("Birthdate cannot be in the future.")
         return self
+
+
+class BloodGlucoseCreate(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value_mg_dl: float = Field(ge=0, le=1000, allow_inf_nan=False)
+    recorded_at: datetime
+
+    @field_validator("recorded_at")
+    @classmethod
+    def require_recorded_offset(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("recordedAt must include an explicit timezone offset.")
+        return value
+
+
+class AppointmentCreate(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=200)
+    starts_at: datetime
+
+    @field_validator("title")
+    @classmethod
+    def clean_title(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Title cannot be blank.")
+        return value.strip()
+
+    @field_validator("starts_at")
+    @classmethod
+    def require_starts_offset(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("startsAt must include an explicit timezone offset.")
+        return value
+
+
+class DiagnosisCreate(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+
+    chief_complaint: str = Field(min_length=1, max_length=5000)
+    medical_diagnosis: str = Field(min_length=1, max_length=5000)
+    therapy: str = Field(min_length=1, max_length=5000)
+    price_amount: float = Field(ge=0, le=999999999999.99, allow_inf_nan=False)
+    currency: Literal["IDR"] = "IDR"
+
+    @field_validator("chief_complaint", "medical_diagnosis", "therapy")
+    @classmethod
+    def clean_clinical_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Clinical text cannot be blank.")
+        return value.strip()
 
 
 def _clean_instructions(values: list[str]) -> list[str]:
@@ -191,6 +243,15 @@ def _audit_read(request: Request, doctor_id: str, patient_id: str, action: str, 
     )
 
 
+def _rpc_row(name: str, params: dict[str, Any]) -> dict[str, Any]:
+    data = get_supabase_service_client().rpc(name, params).execute().data
+    if isinstance(data, list):
+        data = data[0] if data else None
+    if not isinstance(data, dict):
+        raise api_error(500, "clinical_create_failed", "The clinical record could not be created.")
+    return data
+
+
 def _new_patient_code() -> str:
     client = get_supabase_service_client()
     for _ in range(20):
@@ -313,6 +374,26 @@ def list_blood_glucose(
             "valueMgDl": float(row["value_mg_dl"]),
             "recordedAt": _utc_iso(row["recorded_at"]),
         } for row in rows],
+    }
+
+
+@router.post("/me/patients/{patient_id}/blood-glucose", status_code=201)
+def create_blood_glucose(
+    req: BloodGlucoseCreate, patient_id: str, request: Request,
+    doctor: dict[str, Any] = Depends(require_doctor),
+) -> dict[str, Any]:
+    _require_active_patient(doctor["id"], patient_id)
+    row = _rpc_row("doctor_create_blood_glucose", {
+        "p_doctor_id": doctor["id"], "p_patient_id": patient_id,
+        "p_value_mg_dl": req.value_mg_dl,
+        "p_recorded_at": req.recorded_at.astimezone(timezone.utc).isoformat(),
+        "p_request_id": request.state.request_id,
+    })
+    return {
+        "id": str(row["id"]), "patientId": patient_id,
+        "valueMgDl": float(row["value_mg_dl"]),
+        "recordedAt": _utc_iso(row["recorded_at"]),
+        "createdAt": _utc_iso(row["created_at"]),
     }
 
 
@@ -464,4 +545,42 @@ def list_appointments(
         "patientId": patient_id,
         "upcoming": [_appointment(row, patient_id) for row in upcoming_rows[:upcoming_limit]],
         "history": [_appointment(row, patient_id) for row in history_rows[:history_limit]],
+    }
+
+
+@router.post("/me/patients/{patient_id}/appointments", status_code=201)
+def create_appointment(
+    req: AppointmentCreate, patient_id: str, request: Request,
+    doctor: dict[str, Any] = Depends(require_doctor),
+) -> dict[str, Any]:
+    _require_active_patient(doctor["id"], patient_id)
+    row = _rpc_row("doctor_create_appointment", {
+        "p_doctor_id": doctor["id"], "p_patient_id": patient_id,
+        "p_title": req.title,
+        "p_starts_at": req.starts_at.astimezone(timezone.utc).isoformat(),
+        "p_request_id": request.state.request_id,
+    })
+    return _appointment(row, patient_id)
+
+
+@router.post("/me/patients/{patient_id}/diagnoses", status_code=201)
+def create_diagnosis(
+    req: DiagnosisCreate, patient_id: str, request: Request,
+    doctor: dict[str, Any] = Depends(require_doctor),
+) -> dict[str, Any]:
+    _require_active_patient(doctor["id"], patient_id)
+    row = _rpc_row("doctor_create_diagnosis", {
+        "p_doctor_id": doctor["id"], "p_patient_id": patient_id,
+        "p_chief_complaint": req.chief_complaint,
+        "p_medical_diagnosis": req.medical_diagnosis,
+        "p_therapy": req.therapy, "p_price_amount": req.price_amount,
+        "p_currency": req.currency, "p_request_id": request.state.request_id,
+    })
+    return {
+        "id": str(row["id"]), "patientId": patient_id,
+        "doctorId": str(row["doctor_id"]),
+        "chiefComplaint": row["chief_complaint"],
+        "medicalDiagnosis": row["medical_diagnosis"],
+        "therapy": row["therapy"], "priceAmount": float(row["price_amount"]),
+        "currency": row["currency"], "createdAt": _utc_iso(row["created_at"]),
     }
