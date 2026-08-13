@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import secrets
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import ConfigDict, Field, model_validator
 
 from app.api.deps import require_doctor
@@ -153,6 +153,44 @@ def _patient_detail(doctor_id: str, patient_id: str) -> tuple[str, dict[str, Any
     return "claimed", _claimed_detail(claimed[0], clinical_rows[0] if clinical_rows else None, profiles[0] if profiles else None, pets[0] if pets else None)
 
 
+def _require_active_patient(doctor_id: str, patient_id: str) -> None:
+    rows = (
+        get_supabase_service_client().table("users")
+        .select("id").eq("id", patient_id).eq("doctor_id", doctor_id)
+        .eq("role", "child").eq("is_active", True).execute().data or []
+    )
+    if not rows:
+        raise api_error(403, "forbidden", "This operation is not permitted.")
+
+
+def _as_utc(value: str | datetime) -> datetime:
+    parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _utc_iso(value: str | datetime) -> str:
+    return _as_utc(value).isoformat().replace("+00:00", "Z")
+
+
+def _wib_period(days: int) -> tuple[date, date, datetime, datetime]:
+    zone = ZoneInfo("Asia/Jakarta")
+    end_date = datetime.now(zone).date()
+    start_date = end_date - timedelta(days=days - 1)
+    start_at = datetime.combine(start_date, time.min, zone).astimezone(timezone.utc)
+    end_at = datetime.combine(end_date + timedelta(days=1), time.min, zone).astimezone(timezone.utc)
+    return start_date, end_date, start_at, end_at
+
+
+def _audit_read(request: Request, doctor_id: str, patient_id: str, action: str, target_type: str) -> None:
+    record_activity(
+        actor_id=doctor_id, actor_role="doctor", action=action,
+        target_type=target_type, target_id=patient_id, child_id=patient_id,
+        description=f"Viewed patient {target_type}.", request_id=request.state.request_id,
+    )
+
+
 def _new_patient_code() -> str:
     client = get_supabase_service_client()
     for _ in range(20):
@@ -251,3 +289,179 @@ def update_patient(req: PatientUpdate, patient_id: str, request: Request, doctor
     _, detail = _patient_detail(doctor["id"], patient_id)
     record_activity(actor_id=doctor["id"], actor_role="doctor", action="doctor.patient.update", target_type="patient", target_id=patient_id, description="Updated patient profile.", request_id=request.state.request_id, metadata={"changed_fields": sorted(req.model_fields_set)})
     return detail
+
+
+@router.get("/me/patients/{patient_id}/blood-glucose")
+def list_blood_glucose(
+    patient_id: str, request: Request,
+    limit: int = Query(5, ge=1, le=100),
+    doctor: dict[str, Any] = Depends(require_doctor),
+) -> dict[str, Any]:
+    _require_active_patient(doctor["id"], patient_id)
+    rows = (
+        get_supabase_service_client().table("blood_glucose_records")
+        .select("id,patient_id,value_mg_dl,recorded_at")
+        .eq("patient_id", patient_id).order("recorded_at", desc=True)
+        .limit(limit).execute().data or []
+    )
+    rows.reverse()
+    _audit_read(request, doctor["id"], patient_id, "blood_glucose.list", "blood_glucose")
+    return {
+        "patientId": patient_id, "unit": "mg/dL",
+        "items": [{
+            "id": str(row["id"]), "patientId": patient_id,
+            "valueMgDl": float(row["value_mg_dl"]),
+            "recordedAt": _utc_iso(row["recorded_at"]),
+        } for row in rows],
+    }
+
+
+@router.get("/me/patients/{patient_id}/nutrition")
+def get_nutrition(
+    patient_id: str, request: Request,
+    days: int = Query(7, ge=7, le=7),
+    requested_timezone: str = Query("Asia/Jakarta", alias="timezone"),
+    doctor: dict[str, Any] = Depends(require_doctor),
+) -> dict[str, Any]:
+    if requested_timezone != "Asia/Jakarta":
+        raise api_error(422, "validation_error", "One or more fields are invalid.", {"fields": {"timezone": ["Must be Asia/Jakarta."]}})
+    _require_active_patient(doctor["id"], patient_id)
+    start_date, end_date, start_at, end_at = _wib_period(days)
+    rows = (
+        get_supabase_service_client().table("food_logs")
+        .select("id,consumed_at,nutrition").eq("child_id", patient_id)
+        .gte("consumed_at", start_at.isoformat()).lt("consumed_at", end_at.isoformat())
+        .order("consumed_at").execute().data or []
+    )
+    totals: dict[date, dict[str, float]] = {}
+    for offset in range(days):
+        totals[start_date + timedelta(days=offset)] = {key: 0.0 for key in ("sugar", "carbohydrates", "protein", "fiber", "fat")}
+    source_keys = {"sugar": "sugar_g", "carbohydrates": "carbs_g", "protein": "protein_g", "fiber": "fiber_g", "fat": "fat_g"}
+    for row in rows:
+        day = _as_utc(row["consumed_at"]).astimezone(ZoneInfo("Asia/Jakarta")).date()
+        if day not in totals:
+            continue
+        nutrition = row.get("nutrition") or {}
+        for target, source in source_keys.items():
+            totals[day][target] += float(nutrition.get(source, 0) or 0)
+    items = []
+    for day, values in totals.items():
+        recorded_at = datetime.combine(day, time.min, ZoneInfo("Asia/Jakarta")).astimezone(timezone.utc)
+        items.append({
+            "id": f"nutrition-{patient_id}-{day.isoformat()}", "recordedAt": _utc_iso(recorded_at),
+            "sugarGrams": round(values["sugar"], 2), "carbohydratesGrams": round(values["carbohydrates"], 2),
+            "proteinGrams": round(values["protein"], 2), "fiberGrams": round(values["fiber"], 2),
+            "fatGrams": round(values["fat"], 2),
+        })
+    _audit_read(request, doctor["id"], patient_id, "nutrition.view", "nutrition")
+    return {
+        "patientId": patient_id,
+        "period": {"startDate": start_date.isoformat(), "endDate": end_date.isoformat(), "timezone": "Asia/Jakarta"},
+        "unit": "g", "items": items,
+    }
+
+
+@router.get("/me/patients/{patient_id}/medication-adherence")
+def get_medication_adherence(
+    patient_id: str, request: Request,
+    days: int = Query(30, ge=30, le=30),
+    requested_timezone: str = Query("Asia/Jakarta", alias="timezone"),
+    doctor: dict[str, Any] = Depends(require_doctor),
+) -> dict[str, Any]:
+    if requested_timezone != "Asia/Jakarta":
+        raise api_error(422, "validation_error", "One or more fields are invalid.", {"fields": {"timezone": ["Must be Asia/Jakarta."]}})
+    _require_active_patient(doctor["id"], patient_id)
+    start_date, end_date, start_at, _ = _wib_period(days)
+    rows = (
+        get_supabase_service_client().table("schedule_occurrences")
+        .select("id,occurrence_date,status,completed_at,schedule_id")
+        .eq("child_id", patient_id).gte("occurrence_date", start_date.isoformat())
+        .lte("occurrence_date", end_date.isoformat()).execute().data or []
+    )
+    schedule_ids = [str(row["schedule_id"]) for row in rows]
+    medicine_schedules: dict[str, dict[str, Any]] = {}
+    if schedule_ids:
+        schedules = (
+            get_supabase_service_client().table("custom_meal_schedules")
+            .select("id,schedule_type,start_time,end_time").in_("id", schedule_ids)
+            .eq("schedule_type", "medicine").execute().data or []
+        )
+        medicine_schedules = {str(row["id"]): row for row in schedules}
+    counts = {"taken": 0, "takenLate": 0, "skipped": 0}
+    now_wib = datetime.now(ZoneInfo("Asia/Jakarta"))
+    for row in rows:
+        schedule = medicine_schedules.get(str(row["schedule_id"]))
+        if not schedule:
+            continue
+        occurrence_day = date.fromisoformat(str(row["occurrence_date"]))
+        status = row.get("status")
+        if status == "done": counts["taken"] += 1
+        elif status == "late": counts["takenLate"] += 1
+        elif status == "skipped": counts["skipped"] += 1
+        elif status == "not_yet":
+            due_value = schedule.get("end_time") or schedule.get("start_time")
+            due_at = None
+            if due_value:
+                due_at = datetime.combine(occurrence_day, time.fromisoformat(str(due_value)), ZoneInfo("Asia/Jakarta"))
+            if occurrence_day < now_wib.date() or (due_at is not None and due_at <= now_wib):
+                counts["skipped"] += 1
+    _audit_read(request, doctor["id"], patient_id, "medication_adherence.view", "medication_adherence")
+    return {
+        "patientId": patient_id,
+        "period": {"startAt": _utc_iso(start_at), "endAt": _utc_iso(datetime.now(timezone.utc)), "timezone": "Asia/Jakarta"},
+        "counts": counts,
+    }
+
+
+def _appointment(row: dict[str, Any], patient_id: str) -> dict[str, Any]:
+    result = {
+        "id": str(row["id"]), "patientId": patient_id, "title": row["title"],
+        "startsAt": _utc_iso(row["starts_at"]), "status": row["status"],
+    }
+    if row.get("note") is not None: result["note"] = row["note"]
+    if row.get("price_amount") is not None: result["priceAmount"] = float(row["price_amount"])
+    if row.get("currency") is not None: result["currency"] = row["currency"]
+    return result
+
+
+@router.get("/me/patients/{patient_id}/appointments")
+def list_appointments(
+    patient_id: str, request: Request,
+    upcoming_limit: int = Query(20, alias="upcomingLimit", ge=1, le=100),
+    history_limit: int = Query(20, alias="historyLimit", ge=1, le=100),
+    doctor: dict[str, Any] = Depends(require_doctor),
+) -> dict[str, Any]:
+    _require_active_patient(doctor["id"], patient_id)
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    upcoming_rows = (
+        get_supabase_service_client().table("doctor_appointments")
+        .select("id,patient_id,title,starts_at,status,note,price_amount,currency")
+        .eq("patient_id", patient_id).eq("doctor_id", doctor["id"])
+        .eq("status", "scheduled").gte("starts_at", now_iso)
+        .order("starts_at").limit(upcoming_limit).execute().data or []
+    )
+    elapsed_rows = (
+        get_supabase_service_client().table("doctor_appointments")
+        .select("id,patient_id,title,starts_at,status,note,price_amount,currency")
+        .eq("patient_id", patient_id).eq("doctor_id", doctor["id"])
+        .lt("starts_at", now_iso).order("starts_at", desc=True)
+        .limit(history_limit).execute().data or []
+    )
+    completed_future_rows = (
+        get_supabase_service_client().table("doctor_appointments")
+        .select("id,patient_id,title,starts_at,status,note,price_amount,currency")
+        .eq("patient_id", patient_id).eq("doctor_id", doctor["id"])
+        .eq("status", "completed").gte("starts_at", now_iso)
+        .order("starts_at", desc=True).limit(history_limit).execute().data or []
+    )
+    history_by_id = {str(row["id"]): row for row in [*elapsed_rows, *completed_future_rows]}
+    history_rows = list(history_by_id.values())
+    upcoming_rows.sort(key=lambda row: _as_utc(row["starts_at"]))
+    history_rows.sort(key=lambda row: _as_utc(row["starts_at"]), reverse=True)
+    _audit_read(request, doctor["id"], patient_id, "appointment.list", "appointment")
+    return {
+        "patientId": patient_id,
+        "upcoming": [_appointment(row, patient_id) for row in upcoming_rows[:upcoming_limit]],
+        "history": [_appointment(row, patient_id) for row in history_rows[:history_limit]],
+    }
