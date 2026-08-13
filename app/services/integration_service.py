@@ -22,10 +22,12 @@ def canonical_pet(child_id: str) -> dict[str, Any]:
         pet = inserted.data[0]
     else:
         pet = response.data[0]
+    level = int(pet.get("level", 1))
+    threshold = (100 * level) + 150
     return {
-        "level": int(pet.get("level", 1)),
+        "level": level,
         "hp": round((float(pet.get("happiness", 100)) + float(pet.get("hunger", 100))) / 200, 2),
-        "xp": round(float(pet.get("experience_points", 0)) / 100, 2),
+        "xp": round(float(pet.get("experience_points", 0)) / threshold, 2),
     }
 
 

@@ -26,7 +26,7 @@ def test_e2e_scan_food_healthy(mock_upload, mock_detect, test_client, setup_e2e_
     dummy_image_content = img_byte_arr.getvalue()
     files = {"file": ("apple.jpg", dummy_image_content, "image/jpeg")}
 
-    mock_detect.return_value = (True, [{"ingredient": "apple", "description": "Apples, raw", "weight_g": 150, "fdcId": 171688}])
+    mock_detect.return_value = (True, "Apple", [{"ingredient": "apple", "description": "Apples, raw", "weight_g": 150, "fdcId": 171688}])
     mock_upload.return_value = "http://dummy.url/apple.jpg"
     
     # 2. Tembak Endpoint Analyze

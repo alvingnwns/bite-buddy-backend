@@ -1,11 +1,11 @@
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, cast
+from zoneinfo import ZoneInfo
 
 from app.core.supabase import get_supabase_service_client
 from app.services.gamification_service import GamificationService
-from app.services.alert_service import create_alert
-from app.models.database import AlertType
+from app.services.activity_service import record_activity
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +28,8 @@ def check_daily_compliance() -> None:
         if not pets:
             return
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Jakarta"))
         today_date = now.date()
-        today_start_iso = datetime(today_date.year, today_date.month, today_date.day, tzinfo=timezone.utc).isoformat()
         current_time_str = now.time().isoformat()
         # ISO day_of_week: Monday is 0, Sunday is 6
         day_of_week = today_date.weekday() 
@@ -41,23 +40,8 @@ def check_daily_compliance() -> None:
             if not child_id:
                 continue
                 
-            # --- 1. Evaluasi Kepatuhan Obat (Medication) ---
-            # (Untuk prototype, kita masih mengecek apakah ada log obat hari ini. Pada produksi,
-            # sebaiknya obat juga menggunakan tabel jadwal khusus).
-            logs_response = client.table("medication_logs").select("*") \
-                .eq("child_id", child_id) \
-                .gte("created_at", today_start_iso) \
-                .execute()
-                
-            if len(logs_response.data) == 0:
-                logger.info(f"[Compliance Worker] Anak {child_id} belum minum obat hari ini! Penalty obat diterapkan.")
-                try:
-                    gamification.update_pet_status(child_id=child_id, exp_delta=0, happiness_delta=-10, hunger_delta=0)
-                    create_alert(child_id, AlertType.compliance_violation, "Kamu belum minum obat hari ini! Peliharaanmu jadi sakit.")
-                except Exception as e:
-                    logger.error(f"Gagal memberi penalty obat untuk {child_id}: {str(e)}")
-
-            # --- 2. Evaluasi Kepatuhan Makan Berdasarkan Jadwal ---
+            # Evaluasi setiap jadwal yang sudah berakhir. schedule_occurrences
+            # menjadi deduplikasi authoritative agar penalty tidak berulang.
             # Cari jadwal makan hari ini yang WAKTU BERAKHIRNYA (end_time) sudah terlewat
             schedules_response = client.table("custom_meal_schedules").select("*") \
                 .eq("child_id", child_id) \
@@ -67,29 +51,30 @@ def check_daily_compliance() -> None:
                 .execute()
 
             for schedule in schedules_response.data:
-                # Cek deduplikasi penalty
-                if schedule.get("last_penalty_date") == today_date.isoformat():
+                occurrences = client.table("schedule_occurrences").select("id,status") \
+                    .eq("schedule_id", schedule["id"]) \
+                    .eq("occurrence_date", today_date.isoformat()) \
+                    .execute().data or []
+                if occurrences:
                     continue
 
-                # Cek apakah ada food_log untuk meal_type ini hari ini
-                food_logs_resp = client.table("food_logs").select("*") \
-                    .eq("child_id", child_id) \
-                    .eq("meal_type", schedule["meal_type"]) \
-                    .gte("consumed_at", today_start_iso) \
-                    .execute()
-                
-                if len(food_logs_resp.data) == 0:
-                    logger.info(f"[Compliance Worker] Anak {child_id} melewatkan jadwal {schedule['meal_name']}! Penalty diterapkan.")
-                    try:
-                        gamification.update_pet_status(child_id=child_id, exp_delta=0, happiness_delta=-15, hunger_delta=30)
-                        create_alert(child_id, AlertType.compliance_violation, f"Kamu melewatkan jadwal makan '{schedule['meal_name']}'! Peliharaanmu jadi kelaparan.")
-                        
-                        # Update last_penalty_date agar tidak diulang hari ini
-                        client.table("custom_meal_schedules").update(
-                            {"last_penalty_date": today_date.isoformat()}
-                        ).eq("id", schedule["id"]).execute()
-                    except Exception as e:
-                        logger.error(f"Gagal memberi penalty makan untuk {child_id}: {str(e)}")
+                logger.info(f"[Compliance Worker] Anak {child_id} melewatkan jadwal {schedule['meal_name']}! Penalty diterapkan.")
+                try:
+                    occurrence = client.table("schedule_occurrences").insert({
+                        "schedule_id": schedule["id"], "child_id": child_id,
+                        "occurrence_date": today_date.isoformat(), "status": "skipped",
+                    }).execute().data[0]
+                    if schedule.get("schedule_type", "meal") == "medicine":
+                        gamification.apply_missed_medicine_penalty(child_id)
+                    else:
+                        gamification.apply_missed_meal_penalty(child_id)
+                    record_activity(
+                        actor_id=child_id, actor_role="system", action="schedule.missed",
+                        target_type="schedule_occurrence", target_id=str(occurrence["id"]),
+                        child_id=child_id, description=f"Missed {schedule.get('schedule_type', 'meal')} schedule.",
+                    )
+                except Exception as e:
+                    logger.error(f"Gagal memberi penalty jadwal untuk {child_id}: {str(e)}")
                 
     except Exception as e:
         logger.error(f"[Compliance Worker] Terjadi kesalahan saat mengecek data: {str(e)}")

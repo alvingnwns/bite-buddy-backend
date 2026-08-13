@@ -288,7 +288,7 @@ def run(args: argparse.Namespace) -> int:
             ))
             child_alert = _find_notification(child_notifications, patient_notification["title"])
             scenario.step("Child: mark Doctor notification read", lambda: Scenario.expect(
-                client.patch(f"/api/v1/children/me/notifications/{child_alert['id']}/read", headers=scenario.headers("child")), 200,
+                client.patch(f"/api/v1/children/me/notifications/{child_alert['id']}/read", headers=scenario.headers("child")), 204,
             ))
 
             parent_notification = scenario.step("Doctor to Parent: send notification", lambda: Scenario.expect(
@@ -333,6 +333,8 @@ def run(args: argparse.Namespace) -> int:
                     }), 201,
                 ))
             scenario.remember_storage_url("food-photos", food_analysis.get("imageUrl"))
+            if not str(food_analysis.get("foodName") or "").strip():
+                raise LiveE2EFailure("food fixture did not return a consumer-facing foodName")
             food_confirmation = scenario.step("Child: atomic food confirmation", lambda: Scenario.expect(
                 client.post(f"/api/v1/children/me/food-analyses/{food_analysis['analysisId']}/confirm", headers=scenario.headers("child"), json={
                     "portionGrams": food_analysis.get("portionGrams") or 100,

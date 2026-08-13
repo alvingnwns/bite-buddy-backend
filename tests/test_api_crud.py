@@ -33,6 +33,7 @@ REQUIRED = {
     ("get", "/api/v1/parents/me/children/{child_id}/history"),
     ("get", "/api/v1/parents/me/children/{child_id}/history/{history_id}"),
     ("get", "/api/v1/parents/me/children/{child_id}/notifications"),
+    ("patch", "/api/v1/parents/me/children/{child_id}/notifications/{notification_id}/read"),
     ("post", "/api/v1/parents/me/children/{child_id}/reminders"),
     ("get", "/api/v1/activity-logs"),
 }

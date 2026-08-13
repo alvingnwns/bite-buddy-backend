@@ -16,6 +16,9 @@ class Query:
 
     def select(self, *_args): return self
     def eq(self, *_args): return self
+    def update(self, values):
+        self.client.draft.update(values)
+        return self
 
     def execute(self):
         if self.table == "analysis_drafts":
@@ -117,6 +120,27 @@ async def test_food_confirmation_uses_single_atomic_rpc(monkeypatch):
     assert client.rpc_call["p_portion_grams"] == 150
     assert result["history"]["type"] == "food"
     assert result["streakDays"] == 1
+
+
+@pytest.mark.asyncio
+async def test_food_confirmation_persists_user_name_and_sugar_correction(monkeypatch):
+    client = AtomicClient("food")
+    activities = []
+    monkeypatch.setattr(children, "get_supabase_service_client", lambda: client)
+    monkeypatch.setattr(children, "record_activity", lambda **kwargs: activities.append(kwargs))
+
+    await children.confirm_food(
+        client.draft["id"],
+        children.ConfirmFoodRequest(
+            portionGrams=100, foodName="Ice cream", sugarAmountGrams=18,
+        ),
+        {"id": client.draft["child_id"], "role": "child"},
+    )
+
+    assert client.draft["payload"]["foodName"] == "Ice cream"
+    assert client.rpc_call["p_nutrition"]["sugar_g"] == 18
+    assert client.rpc_call["p_is_healthy"] is False
+    assert activities[0]["action"] == "food_analysis.update"
 
 
 def test_medicine_confirmation_uses_single_atomic_rpc(monkeypatch):

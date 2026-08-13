@@ -25,6 +25,7 @@ class IngredientEstimate(BaseModel):
 
 class FoodDetectionResponse(BaseModel):
     is_food: bool = Field(description="False jika gambar BUKAN makanan (contoh: hewan, manusia, benda mati, obat). True jika gambar berisi makanan yang bisa dimakan.")
+    food_name: str = Field(description="Nama hidangan utama yang terlihat, bukan daftar bahan. Contoh: 'Ice cream', 'Nasi goreng', atau 'Spaghetti'. Kosong jika bukan makanan.")
     ingredients: List[IngredientEstimate] = Field(description="Daftar bahan makanan mentah penyusun makanan yang terdeteksi. Kosongkan jika is_food adalah false.")
 
 class AIService:
@@ -35,7 +36,7 @@ class AIService:
         
         self.food_data_service = get_food_data_service()
 
-    async def detect_food_ingredients(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> tuple[bool, List[Dict[str, Any]]]:
+    async def detect_food_ingredients(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> tuple[bool, str, List[Dict[str, Any]]]:
         """
         Mengirim gambar ke Gemini API untuk mendeteksi bahan makanan mentah penyusun (raw ingredients) dan estimasi beratnya.
         Kemudian mencocokkan bahan mentah tersebut dengan FDC ID dari FoodData Central.
@@ -52,11 +53,13 @@ class AIService:
             model = genai.GenerativeModel(self.food_model_name)
             
             prompt = (
-                "You are an expert nutritionist. First, determine if the image actually contains edible food. "
-                "If it does NOT contain food (e.g. it's a cat, a car, a person, or medicine), set 'is_food' to false and leave 'ingredients' empty. "
-                "If it IS food, set 'is_food' to true and break down the food into its fundamental RAW ingredients (e.g. if it's 'Spaghetti', list 'wheat flour' and 'egg' or 'water'). "
-                "This is because we will look up these ingredients in the USDA Foundation Foods database which mostly contains raw, unbranded ingredients. "
-                "For each RAW ingredient, estimate its weight in grams. Provide the name in simple English (e.g. 'wheat flour')."
+                "You are a cautious pediatric nutrition image analyst. Analyze only visible evidence. "
+                "First decide whether the image contains edible food. If not, set is_food=false, food_name='', and ingredients=[]. "
+                "If it is food, identify the primary dish in food_name using a short consumer-facing name, not a comma-separated ingredient list. "
+                "Examples: a scoop or cup of frozen dairy dessert is 'Ice cream'; noodles with tomato sauce are 'Spaghetti'; fried rice is 'Nasi goreng'. "
+                "Do not invent unusual hidden ingredients. Never label ice cream as eggplant unless eggplant is clearly visible. "
+                "Then list only visually supported or standard high-confidence ingredients needed for nutrition estimation. "
+                "Use simple English ingredient names and estimate grams. When uncertain, prefer a generic ingredient such as 'ice cream' over a specific unsupported ingredient."
             )
             
             image_part = {
@@ -77,6 +80,7 @@ class AIService:
             data = json.loads(result_text)
             
             is_food = data.get("is_food", True)
+            food_name = str(data.get("food_name") or "Food").strip()
                 
             ingredients = data.get("ingredients", [])
             
@@ -97,7 +101,7 @@ class AIService:
                     "fdcId": fdc_id
                 })
                 
-            return is_food, mapped_ingredients
+            return is_food, food_name, mapped_ingredients
             
         except Exception as e:
             logger.error(f"Error AI detect_food_ingredients: {e}")

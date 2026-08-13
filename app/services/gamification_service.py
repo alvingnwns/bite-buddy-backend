@@ -77,11 +77,11 @@ class GamificationService:
             pass
 
         # Rule Engine
+        level = self._current_level(child_id)
         if not is_healthy:
-            # Junk food: pet sedih tapi masih kenyang
             exp_delta = 0
-            happiness_delta = -20
-            hunger_delta = 20   # kenyang, tapi dari makanan tidak sehat
+            happiness_delta = -15
+            hunger_delta = -15
             create_alert(
                 child_id,
                 AlertType.food_warning,
@@ -89,14 +89,14 @@ class GamificationService:
             )
         elif total_calories <= (target_calories_per_meal * 1.15):
             # Makan sehat & kalori sesuai target (grace 15%)
-            exp_delta = 15
-            happiness_delta = 15
-            hunger_delta = 30   # kenyang penuh
+            exp_delta = self.xp_gain(level)
+            happiness_delta = 5
+            hunger_delta = 5
         else:
             # Makan sehat tapi kalori berlebih
-            exp_delta = 5
-            happiness_delta = -5
-            hunger_delta = 20   # kenyang tapi kebanyakan
+            exp_delta = self.xp_gain(level)
+            happiness_delta = 5
+            hunger_delta = 5
 
         return self.update_pet_status(child_id, exp_delta, happiness_delta, hunger_delta)
 
@@ -121,8 +121,8 @@ class GamificationService:
         Hunger turun karena pet makin lapar (tidak makan).
         """
         exp_delta = 0
-        happiness_delta = -15
-        hunger_delta = -30  # makin lapar karena tidak makan (hunger TURUN)
+        happiness_delta = -10
+        hunger_delta = -10
 
         create_alert(
             child_id,
@@ -140,7 +140,7 @@ class GamificationService:
         """
         exp_delta = 0
         happiness_delta = -10
-        hunger_delta = 0
+        hunger_delta = -10
 
         create_alert(
             child_id,
@@ -207,13 +207,12 @@ class GamificationService:
         # Hitung EXP baru
         new_exp = current_exp + exp_delta
 
-        # Level Up check (defer: EXP dihitung tapi level tidak naik otomatis)
-        # Ini adalah placeholder — akan diaktifkan pada future feature Level System
         level_up = False
-        if new_exp >= 100:
-            levels_gained = new_exp // 100
-            current_level += levels_gained
-            new_exp = new_exp % 100
+        threshold = self.level_threshold(current_level)
+        while new_exp >= threshold:
+            new_exp -= threshold
+            current_level += 1
+            threshold = self.level_threshold(current_level)
             level_up = True
 
             create_alert(
@@ -253,3 +252,15 @@ class GamificationService:
             "new_hunger": new_hunger,
             "current_status": new_status,
         }
+
+    @staticmethod
+    def level_threshold(level: int) -> int:
+        return (100 * level) + 150
+
+    @staticmethod
+    def xp_gain(level: int) -> int:
+        return round((level * 1.5) + (10 * level))
+
+    def _current_level(self, child_id: UUID) -> int:
+        rows = get_supabase_service_client().table("virtual_pets").select("level").eq("child_id", str(child_id)).execute().data or []
+        return int(rows[0].get("level", 1)) if rows else 1

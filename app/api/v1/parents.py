@@ -155,10 +155,21 @@ def get_child_notifications(child_id: str, limit: int = Query(20, ge=1, le=100),
     return {"items": [notification(row) for row in rows], "nextCursor": rows[-1].get("created_at") if has_more and rows else None}
 
 
+@router.patch("/me/children/{child_id}/notifications/{notification_id}/read", status_code=204)
+def mark_parent_notification_read(child_id: str, notification_id: str, identity: dict[str, Any] = Depends(require_parent)) -> None:
+    assert_parent_child(identity["id"], child_id)
+    client = get_supabase_service_client()
+    rows = (client.table("alerts").select("id").eq("id", notification_id).eq("child_id", child_id)
+            .eq("recipient_user_id", identity["id"]).execute().data or [])
+    if not rows: raise api_error(404, "notification_not_found", "Notification was not found.")
+    client.table("alerts").delete().eq("id", notification_id).eq("child_id", child_id).eq("recipient_user_id", identity["id"]).execute()
+    record_activity(actor_id=identity["id"], actor_role="parent", action="notification.delete_after_read", target_type="notification", target_id=notification_id, child_id=child_id, description="Deleted notification after it was read.")
+
+
 @router.post("/me/children/{child_id}/reminders", status_code=201)
 def send_reminder(child_id: str, req: ReminderRequest, identity: dict[str, Any] = Depends(require_parent)) -> dict[str, Any]:
     assert_parent_child(identity["id"], child_id)
     title, message = ("Parent", "Reminder: Eat") if req.reminder_type == "eat" else ("Parent", "Reminder: Take Pills")
-    row = get_supabase_service_client().table("alerts").insert({"child_id": child_id, "type": "parent_reminder", "sender_type": "parent", "title": title, "message": message, "is_read": False}).execute().data[0]
+    row = get_supabase_service_client().table("alerts").insert({"child_id": child_id, "recipient_user_id": child_id, "type": "parent_reminder", "sender_type": "parent", "title": title, "message": message, "is_read": False}).execute().data[0]
     record_activity(actor_id=identity["id"], actor_role="parent", action="reminder.create", target_type="notification", target_id=str(row["id"]), child_id=child_id, description=f"Sent {req.reminder_type} reminder.")
     return {"notification": notification(row)}

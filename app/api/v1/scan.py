@@ -64,7 +64,8 @@ async def analyze_food(
         # Deteksi bahan makanan menggunakan Gemini
         ai_task = ai_service.detect_food_ingredients(image_bytes=file_bytes, mime_type=file.content_type or "image/jpeg")
 
-        public_url, detected_ingredients = await asyncio.gather(upload_task, ai_task)
+        public_url, detection = await asyncio.gather(upload_task, ai_task)
+        is_food, food_name, detected_ingredients = detection
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -78,6 +79,8 @@ async def analyze_food(
         "message": "Analisis gambar selesai. Silakan konfirmasi bahan dan berat makanan.",
         "data": {
             "photo_url": public_url,
+            "is_food": is_food,
+            "food_name": food_name,
             "ingredients": detected_ingredients
         }
     }

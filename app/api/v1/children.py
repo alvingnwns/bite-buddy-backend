@@ -33,6 +33,8 @@ class ProfileUpdate(CamelModel):
 
 class ConfirmFoodRequest(CamelModel):
     portion_grams: float
+    food_name: str | None = None
+    sugar_amount_grams: float | None = None
 
 
 def _profile(child_id: str) -> dict[str, Any]:
@@ -98,35 +100,45 @@ def get_child_schedules(identity: dict[str, Any] = Depends(require_child)) -> di
     return schedules(identity["id"])
 
 
-async def _image_bytes(file: UploadFile) -> bytes:
-    if file.content_type not in ALLOWED_IMAGE_TYPES:
-        raise api_error(415, "unsupported_media_type", "Only JPEG, PNG, and WebP images are supported.")
+def _detected_image_type(data: bytes) -> str | None:
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+async def _image_bytes(file: UploadFile) -> tuple[bytes, str]:
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise api_error(413, "upload_too_large", "Image size must not exceed 8 MB.")
     if not data:
         raise api_error(400, "empty_upload", "The uploaded image is empty.")
-    return data
+    detected_type = _detected_image_type(data)
+    if detected_type not in ALLOWED_IMAGE_TYPES:
+        raise api_error(415, "unsupported_media_type", "Only JPEG, PNG, and WebP images are supported.")
+    return data, detected_type
 
 
 @router.post("/me/food-analyses", status_code=201)
 async def analyze_food(file: UploadFile = File(...), identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
-    data = await _image_bytes(file)
+    data, mime_type = await _image_bytes(file)
     try:
         public_url, detection = await asyncio.gather(
             storage_service.upload_image(file_bytes=data, filename=file.filename or "food.jpg", bucket_name="food-photos"),
-            ai_service.detect_food_ingredients(image_bytes=data, mime_type=file.content_type or "image/jpeg"),
+            ai_service.detect_food_ingredients(image_bytes=data, mime_type=mime_type),
         )
     except HTTPException:
         raise
     except Exception:
         raise api_error(502, "analysis_failed", "The food image could not be analyzed.")
-    is_food, ingredients = detection
+    is_food, food_name, ingredients = detection
     if not is_food:
         raise api_error(400, "food_not_detected", "No food was detected in the image.")
     totals = reasoning_service.calculate_totals(ingredients)
     portion = sum(float(item.get("weight_g", 0) or 0) for item in ingredients) or 100
-    food_name = ", ".join(str(item.get("description") or item.get("ingredient") or "Food") for item in ingredients)
     payload = {"ingredients": ingredients, "foodName": food_name, "portionGrams": portion, "nutrition": totals}
     inserted = get_supabase_service_client().table("analysis_drafts").insert({
         "child_id": identity["id"], "analysis_type": "food", "payload": payload,
@@ -176,6 +188,10 @@ def _confirmation(history: dict[str, Any], child_id: str, affected: dict[str, An
 async def confirm_food(analysis_id: str, req: ConfirmFoodRequest, identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
     if req.portion_grams <= 0:
         raise api_error(422, "validation_error", "One or more fields are invalid.", {"fields": {"portionGrams": ["Must be greater than zero."]}})
+    if req.food_name is not None and not req.food_name.strip():
+        raise api_error(422, "validation_error", "One or more fields are invalid.", {"fields": {"foodName": ["Must not be blank."]}})
+    if req.sugar_amount_grams is not None and req.sugar_amount_grams < 0:
+        raise api_error(422, "validation_error", "One or more fields are invalid.", {"fields": {"sugarAmountGrams": ["Must be zero or greater."]}})
     client = get_supabase_service_client()
     rows = client.table("analysis_drafts").select("*").eq("id", analysis_id).eq("analysis_type", "food").execute().data or []
     if not rows: raise api_error(404, "analysis_not_found", "Food analysis was not found.")
@@ -190,6 +206,14 @@ async def confirm_food(analysis_id: str, req: ConfirmFoodRequest, identity: dict
     base = payload.get("nutrition") or {}
     scale = req.portion_grams / base_portion
     nutrition = {key: round(float(value or 0) * scale, 2) for key, value in base.items()}
+    if req.food_name is not None:
+        payload["foodName"] = req.food_name.strip()
+    if req.sugar_amount_grams is not None:
+        nutrition["sugar_g"] = round(req.sugar_amount_grams, 2)
+    if req.food_name is not None or req.sugar_amount_grams is not None:
+        payload["nutrition"] = nutrition
+        client.table("analysis_drafts").update({"payload": payload}).eq("id", analysis_id).eq("child_id", identity["id"]).execute()
+        record_activity(actor_id=identity["id"], actor_role="child", action="food_analysis.update", target_type="analysis_draft", target_id=analysis_id, child_id=identity["id"], description="Corrected food analysis before confirmation.")
     is_healthy = float(nutrition.get("sugar_g", 0)) < 15
     try:
         result = client.rpc("confirm_child_analysis", {
@@ -208,11 +232,11 @@ async def confirm_food(analysis_id: str, req: ConfirmFoodRequest, identity: dict
 
 @router.post("/me/medicine-analyses", status_code=201)
 async def analyze_medicine(file: UploadFile = File(...), identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
-    data = await _image_bytes(file)
+    data, mime_type = await _image_bytes(file)
     try:
         public_url, detected = await asyncio.gather(
             storage_service.upload_image(file_bytes=data, filename=file.filename or "medicine.jpg", bucket_name="medicine-photos"),
-            ai_service.detect_medicine(image_bytes=data, mime_type=file.content_type or "image/jpeg"),
+            ai_service.detect_medicine(image_bytes=data, mime_type=mime_type),
         )
     except HTTPException:
         raise
@@ -309,11 +333,11 @@ def get_notifications(limit: int = Query(20, ge=1, le=100), cursor: str | None =
     return {"items": [notification(row) for row in rows], "nextCursor": rows[-1].get("created_at") if has_more and rows else None}
 
 
-@router.patch("/me/notifications/{notification_id}/read")
-def mark_notification_read(notification_id: str, identity: dict[str, Any] = Depends(require_child)) -> dict[str, Any]:
-    rows = (get_supabase_service_client().table("alerts").update({"is_read": True})
-            .eq("id", notification_id).eq("child_id", identity["id"])
+@router.patch("/me/notifications/{notification_id}/read", status_code=204)
+def mark_notification_read(notification_id: str, identity: dict[str, Any] = Depends(require_child)) -> None:
+    client = get_supabase_service_client()
+    rows = (client.table("alerts").select("id").eq("id", notification_id).eq("child_id", identity["id"])
             .or_(f"recipient_user_id.is.null,recipient_user_id.eq.{identity['id']}").execute().data or [])
     if not rows: raise api_error(404, "notification_not_found", "Notification was not found.")
-    record_activity(actor_id=identity["id"], actor_role="child", action="notification.read", target_type="notification", target_id=notification_id, child_id=identity["id"], description="Marked notification as read.")
-    return notification(rows[0])
+    client.table("alerts").delete().eq("id", notification_id).eq("child_id", identity["id"]).execute()
+    record_activity(actor_id=identity["id"], actor_role="child", action="notification.delete_after_read", target_type="notification", target_id=notification_id, child_id=identity["id"], description="Deleted notification after it was read.")
