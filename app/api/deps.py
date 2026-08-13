@@ -11,7 +11,10 @@ def get_identity(token_user: dict[str, Any] = Depends(get_current_user)) -> dict
     response = (
         get_supabase_service_client()
         .table("users")
-        .select("id,username,email,full_name,role,parent_id,is_active")
+        .select(
+            "id,username,email,full_name,role,parent_id,doctor_id,doctor_code,"
+            "birth_date,gender,address,is_active"
+        )
         .eq("id", token_user["id"])
         .single()
         .execute()
@@ -31,6 +34,12 @@ def require_child(identity: dict[str, Any] = Depends(get_identity)) -> dict[str,
 
 def require_parent(identity: dict[str, Any] = Depends(get_identity)) -> dict[str, Any]:
     if identity.get("role") != "parent":
+        raise api_error(403, "forbidden", "This operation is not permitted.")
+    return identity
+
+
+def require_doctor(identity: dict[str, Any] = Depends(get_identity)) -> dict[str, Any]:
+    if identity.get("role") != "doctor":
         raise api_error(403, "forbidden", "This operation is not permitted.")
     return identity
 
