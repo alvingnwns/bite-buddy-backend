@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from app.api.deps import require_doctor
@@ -14,6 +14,7 @@ from app.core.supabase import get_supabase_service_client
 from app.models.base import CamelModel
 from app.models.database import Gender
 from app.services.activity_service import record_activity
+from app.services.doctor_ai_service import DoctorAiUnavailable, generate_doctor_summary
 
 router = APIRouter()
 
@@ -108,6 +109,24 @@ class DiagnosisCreate(CamelModel):
         if not value.strip():
             raise ValueError("Clinical text cannot be blank.")
         return value.strip()
+
+
+class NotificationCreate(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+
+    recipient: Literal["patient", "parent"]
+    type: Literal[
+        "eat_more_vegetables", "take_medication",
+        "appointment_reminder", "reduce_sugar",
+    ]
+
+
+NOTIFICATION_TEMPLATES = {
+    "eat_more_vegetables": ("Healthy meal reminder", "Please include more vegetables in the next meal."),
+    "take_medication": ("Medication reminder", "Please take the scheduled medication on time."),
+    "appointment_reminder": ("Appointment reminder", "Please remember the upcoming doctor appointment."),
+    "reduce_sugar": ("Nutrition reminder", "Please reduce added sugar in the next meal."),
+}
 
 
 def _clean_instructions(values: list[str]) -> list[str]:
@@ -250,6 +269,48 @@ def _rpc_row(name: str, params: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise api_error(500, "clinical_create_failed", "The clinical record could not be created.")
     return data
+
+
+def _summary_source(patient_id: str) -> dict[str, Any]:
+    client = get_supabase_service_client()
+    start_date, end_date, start_at, end_at = _wib_period(30)
+    patient = client.table("users").select("id,full_name,birth_date,gender").eq(
+        "id", patient_id
+    ).execute().data or []
+    clinical = client.table("clinical_parameters").select(
+        "height_cm,weight_kg,medical_conditions,recorded_at"
+    ).eq("child_id", patient_id).order("recorded_at", desc=True).limit(1).execute().data or []
+    glucose = client.table("blood_glucose_records").select(
+        "value_mg_dl,recorded_at"
+    ).eq("patient_id", patient_id).order("recorded_at", desc=True).limit(10).execute().data or []
+    food = client.table("food_logs").select("consumed_at,nutrition").eq(
+        "child_id", patient_id
+    ).gte("consumed_at", start_at.isoformat()).lt("consumed_at", end_at.isoformat()).order(
+        "consumed_at", desc=True
+    ).limit(100).execute().data or []
+    appointments = client.table("doctor_appointments").select(
+        "title,starts_at,status"
+    ).eq("patient_id", patient_id).order("starts_at", desc=True).limit(20).execute().data or []
+    medicine_schedules = client.table("custom_meal_schedules").select("id").eq(
+        "child_id", patient_id
+    ).eq("schedule_type", "medicine").execute().data or []
+    medicine_ids = {str(row["id"]) for row in medicine_schedules}
+    occurrences = client.table("schedule_occurrences").select(
+        "schedule_id,occurrence_date,status,completed_at"
+    ).eq("child_id", patient_id).gte("occurrence_date", start_date.isoformat()).lte(
+        "occurrence_date", end_date.isoformat()
+    ).execute().data or []
+    return {
+        "patient": patient[0] if patient else {"id": patient_id},
+        "latestClinicalParameters": clinical[0] if clinical else None,
+        "recentBloodGlucose": glucose,
+        "recentNutritionLogs": food,
+        "medicationAdherenceOccurrences": [
+            row for row in occurrences if str(row.get("schedule_id")) in medicine_ids
+        ],
+        "appointments": appointments,
+        "timezone": "Asia/Jakarta",
+    }
 
 
 def _new_patient_code() -> str:
@@ -583,4 +644,100 @@ def create_diagnosis(
         "medicalDiagnosis": row["medical_diagnosis"],
         "therapy": row["therapy"], "priceAmount": float(row["price_amount"]),
         "currency": row["currency"], "createdAt": _utc_iso(row["created_at"]),
+    }
+
+
+@router.get("/me/patients/{patient_id}/ai-summary")
+async def get_ai_summary(
+    patient_id: str, request: Request,
+    doctor: dict[str, Any] = Depends(require_doctor),
+) -> dict[str, Any]:
+    _require_active_patient(doctor["id"], patient_id)
+    try:
+        summary = await generate_doctor_summary(_summary_source(patient_id))
+    except DoctorAiUnavailable:
+        record_activity(
+            actor_id=doctor["id"], actor_role="doctor",
+            action="ai_summary.generate", target_type="ai_summary",
+            target_id=patient_id, child_id=patient_id,
+            description="AI summary generation failed.", outcome="failure",
+            request_id=request.state.request_id,
+        )
+        raise api_error(503, "ai_provider_unavailable", "AI summary is temporarily unavailable.")
+    except Exception:
+        record_activity(
+            actor_id=doctor["id"], actor_role="doctor",
+            action="ai_summary.generate", target_type="ai_summary",
+            target_id=patient_id, child_id=patient_id,
+            description="AI summary source loading failed.", outcome="failure",
+            request_id=request.state.request_id,
+        )
+        raise api_error(500, "ai_summary_failed", "AI summary could not be generated.")
+    record_activity(
+        actor_id=doctor["id"], actor_role="doctor",
+        action="ai_summary.generate", target_type="ai_summary",
+        target_id=patient_id, child_id=patient_id,
+        description="Generated patient AI summary.", outcome="success",
+        request_id=request.state.request_id,
+    )
+    return {"patientId": patient_id, **summary.model_dump()}
+
+
+@router.post("/me/patients/{patient_id}/notifications", status_code=201)
+def create_notification(
+    req: NotificationCreate, patient_id: str, request: Request,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=8, max_length=128,
+    ),
+    doctor: dict[str, Any] = Depends(require_doctor),
+) -> dict[str, Any]:
+    _require_active_patient(doctor["id"], patient_id)
+    client = get_supabase_service_client()
+    if req.recipient == "parent":
+        patient = client.table("users").select("parent_id").eq("id", patient_id).eq(
+            "doctor_id", doctor["id"]
+        ).execute().data or []
+        parent_id = patient[0].get("parent_id") if patient else None
+        parent = client.table("users").select("id").eq("id", parent_id).eq(
+            "role", "parent"
+        ).eq("is_active", True).execute().data if parent_id else []
+        if not parent:
+            record_activity(
+                actor_id=doctor["id"], actor_role="doctor",
+                action="notification.create", target_type="notification",
+                child_id=patient_id, description="Parent notification creation failed.",
+                outcome="failure", request_id=request.state.request_id,
+                metadata={"recipient": "parent", "notification_type": req.type},
+            )
+            raise api_error(409, "parent_not_linked", "The patient has no linked active parent.")
+    title, body = NOTIFICATION_TEMPLATES[req.type]
+    try:
+        row = _rpc_row("doctor_create_notification", {
+            "p_doctor_id": doctor["id"], "p_patient_id": patient_id,
+            "p_recipient": req.recipient, "p_type": req.type,
+            "p_title": title, "p_body": body,
+            "p_idempotency_key": idempotency_key or request.state.request_id,
+            "p_request_id": request.state.request_id,
+        })
+    except Exception as exc:
+        error_text = str(exc)
+        record_activity(
+            actor_id=doctor["id"], actor_role="doctor",
+            action="notification.create", target_type="notification",
+            child_id=patient_id, description="Notification creation failed.",
+            outcome="failure", request_id=request.state.request_id,
+            metadata={"recipient": req.recipient, "notification_type": req.type},
+        )
+        if "parent_not_linked" in error_text:
+            raise api_error(409, "parent_not_linked", "The patient has no linked active parent.")
+        if "idempotency_conflict" in error_text:
+            raise api_error(409, "idempotency_conflict", "The idempotency key was already used for another notification.")
+        if "doctor_patient_forbidden" in error_text:
+            raise api_error(403, "forbidden", "This operation is not permitted.")
+        raise api_error(500, "notification_create_failed", "The notification could not be created.")
+    return {
+        "id": str(row["id"]), "patientId": patient_id,
+        "recipient": row["recipient"], "type": row["type"],
+        "title": row["title"], "body": row["body"],
+        "createdAt": _utc_iso(row["created_at"]),
     }

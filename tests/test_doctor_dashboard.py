@@ -9,10 +9,12 @@ from fastapi.testclient import TestClient
 from app.api.deps import require_doctor
 from app.api.v1 import doctors
 from app.main import app
+from app.services.doctor_ai_service import DoctorAiUnavailable, DoctorSummary
 
 DOCTOR_ID = "00000000-0000-0000-0000-000000000010"
 PATIENT_ID = "00000000-0000-0000-0000-000000000020"
 OTHER_PATIENT_ID = "00000000-0000-0000-0000-000000000021"
+PARENT_ID = "00000000-0000-0000-0000-000000000030"
 
 
 class Query:
@@ -55,8 +57,9 @@ class FakeClient:
         yesterday_at_noon_wib = datetime.combine(yesterday, datetime.min.time(), ZoneInfo("Asia/Jakarta")) + timedelta(hours=12)
         self.tables = {
             "users": [
-                {"id": PATIENT_ID, "doctor_id": DOCTOR_ID, "role": "child", "is_active": True},
+                {"id": PATIENT_ID, "doctor_id": DOCTOR_ID, "parent_id": PARENT_ID, "role": "child", "is_active": True},
                 {"id": OTHER_PATIENT_ID, "doctor_id": "other-doctor", "role": "child", "is_active": True},
+                {"id": PARENT_ID, "role": "parent", "is_active": True},
             ],
             "blood_glucose_records": [
                 {"id": "g-2", "patient_id": PATIENT_ID, "value_mg_dl": 130, "recorded_at": (now - timedelta(hours=1)).isoformat()},
@@ -106,6 +109,13 @@ class FakeClient:
                 "medical_diagnosis": params["p_medical_diagnosis"],
                 "therapy": params["p_therapy"], "price_amount": params["p_price_amount"],
                 "currency": params["p_currency"], "created_at": now,
+            }
+        elif name == "doctor_create_notification":
+            row = {
+                "id": "notification-created", "patient_id": params["p_patient_id"],
+                "recipient": params["p_recipient"], "type": params["p_type"],
+                "title": params["p_title"], "body": params["p_body"],
+                "created_at": now,
             }
         else:
             raise AssertionError(f"Unexpected RPC {name}")
@@ -241,3 +251,100 @@ def test_clinical_mutations_reject_cross_doctor_patient(monkeypatch):
     })
     assert response.status_code == 403
     assert OTHER_PATIENT_ID not in response.text
+
+
+def test_ai_summary_uses_authorized_patient_data_and_audits_generation(monkeypatch):
+    captured = {}
+
+    async def generate(source):
+        captured.update(source)
+        return DoctorSummary(overview="Glucose is stable.", insights=["Continue monitoring."])
+
+    activities = setup(monkeypatch)
+    monkeypatch.setattr(doctors, "generate_doctor_summary", generate)
+    try:
+        response = TestClient(app).get(f"/api/v1/doctors/me/patients/{PATIENT_ID}/ai-summary")
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert response.json() == {
+        "patientId": PATIENT_ID, "overview": "Glucose is stable.",
+        "insights": ["Continue monitoring."],
+    }
+    assert captured["patient"]["id"] == PATIENT_ID
+    assert all(str(OTHER_PATIENT_ID) not in str(value) for value in captured.values())
+    assert activities[-1]["action"] == "ai_summary.generate"
+    assert activities[-1]["outcome"] == "success"
+
+
+def test_ai_summary_provider_failure_returns_safe_service_error(monkeypatch):
+    async def fail(_source):
+        raise DoctorAiUnavailable("provider detail")
+
+    activities = setup(monkeypatch)
+    monkeypatch.setattr(doctors, "generate_doctor_summary", fail)
+    try:
+        response = TestClient(app).get(f"/api/v1/doctors/me/patients/{PATIENT_ID}/ai-summary")
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 503
+    assert response.json()["code"] == "ai_provider_unavailable"
+    assert "provider detail" not in response.text
+    assert activities[-1]["outcome"] == "failure"
+
+
+def test_notification_uses_server_template_and_idempotency_key(monkeypatch):
+    client = FakeClient()
+    activities = []
+    monkeypatch.setattr(doctors, "get_supabase_service_client", lambda: client)
+    monkeypatch.setattr(doctors, "record_activity", lambda **kwargs: activities.append(kwargs))
+    app.dependency_overrides[require_doctor] = lambda: {"id": DOCTOR_ID, "role": "doctor"}
+    try:
+        response = TestClient(app).post(
+            f"/api/v1/doctors/me/patients/{PATIENT_ID}/notifications",
+            headers={"Idempotency-Key": "notification-request-1"},
+            json={"recipient": "patient", "type": "take_medication"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 201
+    assert response.json()["title"] == "Medication reminder"
+    assert client.last_rpc[1]["p_idempotency_key"] == "notification-request-1"
+    assert client.last_rpc[1]["p_patient_id"] == PATIENT_ID
+    assert activities == []
+
+
+def test_parent_notification_requires_active_link(monkeypatch):
+    client = FakeClient()
+    client.tables["users"][0]["parent_id"] = None
+    activities = []
+    monkeypatch.setattr(doctors, "get_supabase_service_client", lambda: client)
+    monkeypatch.setattr(doctors, "record_activity", lambda **kwargs: activities.append(kwargs))
+    app.dependency_overrides[require_doctor] = lambda: {"id": DOCTOR_ID, "role": "doctor"}
+    try:
+        response = TestClient(app).post(
+            f"/api/v1/doctors/me/patients/{PATIENT_ID}/notifications",
+            headers={"Idempotency-Key": "notification-request-2"},
+            json={"recipient": "parent", "type": "reduce_sugar"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 409
+    assert response.json()["code"] == "parent_not_linked"
+    assert activities[-1]["outcome"] == "failure"
+
+
+def test_ai_and_notification_reject_cross_doctor_patient(monkeypatch):
+    activities = setup(monkeypatch)
+    try:
+        ai_response = TestClient(app).get(f"/api/v1/doctors/me/patients/{OTHER_PATIENT_ID}/ai-summary")
+        notification_response = TestClient(app).post(
+            f"/api/v1/doctors/me/patients/{OTHER_PATIENT_ID}/notifications",
+            json={"recipient": "patient", "type": "take_medication"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+    assert ai_response.status_code == 403
+    assert notification_response.status_code == 403
+    assert OTHER_PATIENT_ID not in ai_response.text + notification_response.text
+    assert activities == []

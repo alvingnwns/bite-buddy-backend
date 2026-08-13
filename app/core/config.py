@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     gemini_food_model: str = "gemini-3.5-flash"       # Untuk deteksi makanan dari foto
     gemini_medicine_model: str = "gemini-3.5-flash"   # Untuk deteksi obat/insulin dari foto
     gemini_nutrition_model: str = "gemini-3.5-flash"  # Untuk estimasi kalori & makronutrien
+    gemini_doctor_model: str = "gemini-3.5-flash"     # Ringkasan klinis Doctor
 
     @field_validator("debug", mode="before")
     @classmethod
