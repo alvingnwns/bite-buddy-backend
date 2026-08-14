@@ -53,10 +53,16 @@ def test_nutrition_evaluation_uses_qwen_when_gemini_fails(monkeypatch):
 
     service.openrouter = NutritionFallback()
 
-    class BrokenModel:
-        async def generate_content_async(self, *_args, **_kwargs):
+    class BrokenModels:
+        async def generate_content(self, *_args, **_kwargs):
             raise RuntimeError("quota exceeded")
 
-    monkeypatch.setattr("app.services.reasoning_service.genai.GenerativeModel", lambda *_args: BrokenModel())
+    class BrokenAsyncClient:
+        models = BrokenModels()
+
+    class BrokenClient:
+        aio = BrokenAsyncClient()
+
+    service.gemini = BrokenClient()
     result = asyncio.run(service.evaluate_meal_health([], {"sugar_g": 4, "fiber_g": 3}))
     assert result == {"is_healthy": True, "health_score": 82, "explanation": "Gula masih terkontrol."}

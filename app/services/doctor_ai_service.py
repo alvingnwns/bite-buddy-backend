@@ -4,7 +4,8 @@ import json
 import logging
 from typing import Any
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
@@ -46,11 +47,11 @@ async def generate_doctor_summary(source: dict[str, Any]) -> DoctorSummary:
     )
     if settings.gemini_api_key:
         try:
-            genai.configure(api_key=settings.gemini_api_key)
-            model = genai.GenerativeModel(settings.gemini_doctor_model)
-            response = await model.generate_content_async(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
+            client = genai.Client(api_key=settings.gemini_api_key)
+            response = await client.aio.models.generate_content(
+                model=settings.gemini_doctor_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     response_schema=DOCTOR_SUMMARY_PROVIDER_SCHEMA,
                     temperature=0.2,

@@ -4,7 +4,8 @@ import json
 import logging
 from typing import Any
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -13,10 +14,6 @@ from app.services.food_data_service import get_food_data_service
 from app.services.openrouter_service import OpenRouterService
 
 logger = logging.getLogger(__name__)
-
-if settings.gemini_api_key:
-    genai.configure(api_key=settings.gemini_api_key)
-
 
 class IngredientEstimate(BaseModel):
     name: str = Field(description="Simple English ingredient name")
@@ -67,14 +64,17 @@ class AIService:
         self.api_key = settings.gemini_api_key
         self.food_model_name = settings.gemini_food_model
         self.medicine_model_name = settings.gemini_medicine_model
+        self.gemini = genai.Client(api_key=self.api_key) if self.api_key else None
         self.food_data_service = get_food_data_service()
         self.openrouter = OpenRouterService()
 
     async def _gemini_food(self, image_bytes: bytes, mime_type: str) -> dict[str, Any]:
-        model = genai.GenerativeModel(self.food_model_name)
-        response = await model.generate_content_async(
-            contents=[FOOD_PROMPT, {"mime_type": mime_type, "data": image_bytes}],
-            generation_config=genai.types.GenerationConfig(
+        if self.gemini is None:
+            raise RuntimeError("Gemini is not configured")
+        response = await self.gemini.aio.models.generate_content(
+            model=self.food_model_name,
+            contents=[FOOD_PROMPT, types.Part.from_bytes(data=image_bytes, mime_type=mime_type)],
+            config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=FoodDetectionResponse,
                 temperature=0.2,
@@ -138,10 +138,12 @@ class AIService:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
 
     async def _gemini_medicine(self, image_bytes: bytes, mime_type: str) -> dict[str, Any]:
-        model = genai.GenerativeModel(self.medicine_model_name)
-        response = await model.generate_content_async(
-            contents=[MEDICINE_PROMPT, {"mime_type": mime_type, "data": image_bytes}],
-            generation_config=genai.types.GenerationConfig(
+        if self.gemini is None:
+            raise RuntimeError("Gemini is not configured")
+        response = await self.gemini.aio.models.generate_content(
+            model=self.medicine_model_name,
+            contents=[MEDICINE_PROMPT, types.Part.from_bytes(data=image_bytes, mime_type=mime_type)],
+            config=types.GenerateContentConfig(
                 response_mime_type="application/json", temperature=0.1
             ),
         )

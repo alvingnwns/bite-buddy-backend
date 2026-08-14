@@ -4,7 +4,8 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -13,9 +14,6 @@ from app.services.food_data_service import get_food_data_service
 from app.services.openrouter_service import OpenRouterService
 
 logger = logging.getLogger(__name__)
-
-if settings.gemini_api_key:
-    genai.configure(api_key=settings.gemini_api_key)
 
 class MealEvaluation(BaseModel):
     is_healthy: bool = Field(description="Apakah makanan ini tergolong sehat untuk penderita diabetes/anak-anak secara umum?")
@@ -27,6 +25,7 @@ class ReasoningService:
         self.food_data_service = get_food_data_service()
         self.api_key = settings.gemini_api_key
         self.nutrition_model_name = getattr(settings, "gemini_nutrition_model", "gemini-3.5-flash")
+        self.gemini = genai.Client(api_key=self.api_key) if self.api_key else None
         self.openrouter = OpenRouterService()
 
     def calculate_totals(self, confirmed_ingredients: List[Dict[str, Any]]) -> Dict[str, float]:
@@ -63,10 +62,12 @@ class ReasoningService:
 
         if self.api_key:
             try:
-                model = genai.GenerativeModel(self.nutrition_model_name)
-                response = await model.generate_content_async(
-                    prompt,
-                    generation_config=genai.types.GenerationConfig(
+                if self.gemini is None:
+                    raise RuntimeError("Gemini is not configured")
+                response = await self.gemini.aio.models.generate_content(
+                    model=self.nutrition_model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
                         response_mime_type="application/json",
                         response_schema=MealEvaluation,
                         temperature=0.3,

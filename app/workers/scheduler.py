@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -8,6 +9,7 @@ from app.workers.compliance_worker import check_daily_compliance, clean_old_aler
 
 scheduler: AsyncIOScheduler | None = None
 WIB = ZoneInfo("Asia/Jakarta")
+logger = logging.getLogger(__name__)
 
 def start_scheduler() -> None:
     """
@@ -16,6 +18,7 @@ def start_scheduler() -> None:
     """
     global scheduler
     if not settings.scheduler_enabled:
+        logger.info("Scheduler disabled by SCHEDULER_ENABLED")
         return
     if scheduler is not None and scheduler.running:
         return
@@ -46,6 +49,9 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
     scheduler.start()
+    logger.info(
+        "Scheduler started timezone=Asia/Jakarta jobs=daily_compliance_wib,daily_alert_cleanup_wib"
+    )
 
 def stop_scheduler() -> None:
     """
@@ -55,4 +61,5 @@ def stop_scheduler() -> None:
     global scheduler
     if scheduler is not None and scheduler.running:
         scheduler.shutdown(wait=False)
+        logger.info("Scheduler stopped")
     scheduler = None
