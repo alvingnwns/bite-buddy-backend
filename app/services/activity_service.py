@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.core.supabase import get_supabase_service_client
+
+logger = logging.getLogger(__name__)
 
 
 def record_activity(
@@ -46,4 +49,5 @@ def record_activity(
         ).execute()
     except Exception:
         # Logging is best-effort because older deployments may not have migration 008/009.
+        logger.exception("Failed to persist activity log action=%s", action)
         return

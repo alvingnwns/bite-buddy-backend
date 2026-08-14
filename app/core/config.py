@@ -18,9 +18,10 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "BiteBuddy API"
-    app_version: str = "0.1.0"
+    app_version: str = "1.0.0"
     debug: bool = False
     cors_origins: str = "*"
+    scheduler_enabled: bool = True
 
     # ── Supabase ──────────────────────────────
     supabase_url: str = ""
