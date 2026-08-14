@@ -1,4 +1,5 @@
 from datetime import datetime
+import logging
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -8,8 +9,11 @@ from app.workers import scheduler as scheduler_module
 
 
 @pytest.mark.asyncio
-async def test_scheduler_uses_production_wib_cron(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_scheduler_uses_production_wib_cron(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     monkeypatch.setattr(settings, "scheduler_enabled", True)
+    caplog.set_level(logging.INFO, logger="uvicorn.error")
 
     scheduler_module.start_scheduler()
     try:
@@ -30,6 +34,7 @@ async def test_scheduler_uses_production_wib_cron(monkeypatch: pytest.MonkeyPatc
         assert cleanup.trigger.get_next_fire_time(None, reference) == datetime(
             2026, 8, 15, 0, 30, tzinfo=wib
         )
+        assert "Scheduler started timezone=Asia/Jakarta" in caplog.text
     finally:
         scheduler_module.stop_scheduler()
 

@@ -9,7 +9,9 @@ from app.workers.compliance_worker import check_daily_compliance, clean_old_aler
 
 scheduler: AsyncIOScheduler | None = None
 WIB = ZoneInfo("Asia/Jakarta")
-logger = logging.getLogger(__name__)
+# Uvicorn configures this logger at INFO; use it so lifecycle messages are
+# visible in Railway Deploy Logs without changing global logging settings.
+logger = logging.getLogger("uvicorn.error")
 
 def start_scheduler() -> None:
     """
