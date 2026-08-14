@@ -22,7 +22,11 @@ def decode_jwt(token: str) -> Dict[str, Any]:
     if not settings.supabase_jwt_secret:
         try:
             response = get_supabase_service_client().auth.get_claims(token)
-            claims = dict(response.claims) if response and response.claims else {}
+            if isinstance(response, dict):
+                claims = dict(response.get("claims") or response)
+            else:
+                response_claims = getattr(response, "claims", None)
+                claims = dict(response_claims) if response_claims else {}
             if not claims.get("sub"):
                 raise ValueError("Supabase did not return verified claims")
             return claims

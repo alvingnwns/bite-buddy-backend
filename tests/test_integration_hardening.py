@@ -108,6 +108,21 @@ def test_missing_jwt_secret_uses_supabase_token_verification(monkeypatch):
     assert verified == ["signed-token"]
 
 
+def test_missing_jwt_secret_accepts_supabase_dict_claims(monkeypatch):
+    class Auth:
+        def get_claims(self, _token):
+            return {"claims": {"sub": "verified-dict-user", "role": "authenticated"}}
+
+    monkeypatch.setattr(auth.settings, "supabase_jwt_secret", "")
+    monkeypatch.setattr(
+        auth, "get_supabase_service_client", lambda: SimpleNamespace(auth=Auth()),
+    )
+
+    assert auth.decode_jwt("signed-token") == {
+        "sub": "verified-dict-user", "role": "authenticated",
+    }
+
+
 @pytest.mark.asyncio
 async def test_food_confirmation_uses_single_atomic_rpc(monkeypatch):
     client = AtomicClient("food")
