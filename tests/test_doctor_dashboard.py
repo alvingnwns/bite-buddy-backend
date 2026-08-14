@@ -87,6 +87,11 @@ class FakeClient:
                 {"id": "a-future", "patient_id": PATIENT_ID, "doctor_id": DOCTOR_ID, "title": "Future", "starts_at": (now + timedelta(days=2)).isoformat(), "status": "scheduled", "note": None, "price_amount": None, "currency": None},
                 {"id": "a-past", "patient_id": PATIENT_ID, "doctor_id": DOCTOR_ID, "title": "Elapsed", "starts_at": (now - timedelta(days=2)).isoformat(), "status": "scheduled", "note": "Review", "price_amount": 100000, "currency": "IDR"},
             ],
+            "doctor_diagnoses": [
+                {"id": "d-older", "patient_id": PATIENT_ID, "doctor_id": DOCTOR_ID, "chief_complaint": "Fatigue", "medical_diagnosis": "Diabetes Type I", "therapy": "Continue treatment", "price_amount": 100000, "currency": "IDR", "created_at": "2026-08-12T03:00:00+00:00"},
+                {"id": "d-newer", "patient_id": PATIENT_ID, "doctor_id": DOCTOR_ID, "chief_complaint": "Dizziness", "medical_diagnosis": "Hypoglycemia", "therapy": "Adjust insulin", "price_amount": 150000, "currency": "IDR", "created_at": "2026-08-13T03:00:00+00:00"},
+                {"id": "d-other-doctor", "patient_id": PATIENT_ID, "doctor_id": "other-doctor", "chief_complaint": "Hidden", "medical_diagnosis": "Private", "therapy": "Private", "price_amount": 1, "currency": "IDR", "created_at": "2026-08-14T03:00:00+00:00"},
+            ],
         }
 
     def table(self, name): return Query(self, name)
@@ -189,6 +194,28 @@ def test_appointments_move_elapsed_schedule_to_history_without_completing(monkey
     assert [item["id"] for item in body["history"]] == ["a-past"]
     assert body["history"][0]["status"] == "scheduled"
     assert activities[0]["action"] == "appointment.list"
+
+
+def test_doctor_receives_diagnosis_history_newest_first(monkeypatch):
+    response, activities = request(monkeypatch, f"/api/v1/doctors/me/patients/{PATIENT_ID}/diagnoses")
+    assert response.status_code == 200
+    assert response.json() == {
+        "patientId": PATIENT_ID,
+        "total": 2,
+        "items": [
+            {
+                "id": "d-newer", "medicalDiagnosis": "Hypoglycemia",
+                "therapy": "Adjust insulin", "priceAmount": 150000.0,
+                "currency": "IDR", "createdAt": "2026-08-13T03:00:00Z",
+            },
+            {
+                "id": "d-older", "medicalDiagnosis": "Diabetes Type I",
+                "therapy": "Continue treatment", "priceAmount": 100000.0,
+                "currency": "IDR", "createdAt": "2026-08-12T03:00:00Z",
+            },
+        ],
+    }
+    assert activities[0]["action"] == "diagnosis.list"
 
 
 def test_clinical_reads_reject_cross_doctor_patient_without_audit(monkeypatch):

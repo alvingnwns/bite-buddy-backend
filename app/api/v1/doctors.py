@@ -608,6 +608,17 @@ def _appointment(row: dict[str, Any], patient_id: str) -> dict[str, Any]:
     return result
 
 
+def _diagnosis_details(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "medicalDiagnosis": row["medical_diagnosis"],
+        "therapy": row["therapy"],
+        "priceAmount": float(row["price_amount"]),
+        "currency": row["currency"],
+        "createdAt": _utc_iso(row["created_at"]),
+    }
+
+
 @router.get("/me/patients/{patient_id}/appointments")
 def list_appointments(
     patient_id: str, request: Request,
@@ -666,6 +677,26 @@ def create_appointment(
     return _appointment(row, patient_id)
 
 
+@router.get("/me/patients/{patient_id}/diagnoses")
+def list_diagnoses(
+    patient_id: str, request: Request,
+    doctor: dict[str, Any] = Depends(require_doctor),
+) -> dict[str, Any]:
+    _require_active_patient(doctor["id"], patient_id)
+    rows = (
+        get_supabase_service_client().table("doctor_diagnoses")
+        .select("id,patient_id,doctor_id,medical_diagnosis,therapy,price_amount,currency,created_at")
+        .eq("patient_id", patient_id).eq("doctor_id", doctor["id"])
+        .order("created_at", desc=True).execute().data or []
+    )
+    _audit_read(request, doctor["id"], patient_id, "diagnosis.list", "diagnosis")
+    return {
+        "patientId": patient_id,
+        "total": len(rows),
+        "items": [_diagnosis_details(row) for row in rows],
+    }
+
+
 @router.post("/me/patients/{patient_id}/diagnoses", status_code=201)
 def create_diagnosis(
     req: DiagnosisCreate, patient_id: str, request: Request,
@@ -680,12 +711,9 @@ def create_diagnosis(
         "p_currency": req.currency, "p_request_id": request.state.request_id,
     })
     return {
-        "id": str(row["id"]), "patientId": patient_id,
+        **_diagnosis_details(row), "patientId": patient_id,
         "doctorId": str(row["doctor_id"]),
         "chiefComplaint": row["chief_complaint"],
-        "medicalDiagnosis": row["medical_diagnosis"],
-        "therapy": row["therapy"], "priceAmount": float(row["price_amount"]),
-        "currency": row["currency"], "createdAt": _utc_iso(row["created_at"]),
     }
 
 
