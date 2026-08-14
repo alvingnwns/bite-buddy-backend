@@ -14,6 +14,7 @@ from app.services.food_data_service import get_food_data_service
 from app.services.openrouter_service import OpenRouterService
 
 logger = logging.getLogger(__name__)
+NO_AUTO_FUNCTION_CALLING = types.AutomaticFunctionCallingConfig(disable=True)
 
 class IngredientEstimate(BaseModel):
     name: str = Field(description="Simple English ingredient name")
@@ -31,6 +32,36 @@ class FoodDetectionResponse(BaseModel):
     food_name: str
     ingredients: list[IngredientEstimate]
 
+
+FOOD_DETECTION_PROVIDER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "is_food": {"type": "boolean"},
+        "food_name": {"type": "string"},
+        "ingredients": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "weight_g": {"type": "number"},
+                    "kcal_per_100g": {"type": "number"},
+                    "protein_g_per_100g": {"type": "number"},
+                    "fat_g_per_100g": {"type": "number"},
+                    "carbs_g_per_100g": {"type": "number"},
+                    "sugar_g_per_100g": {"type": "number"},
+                    "fiber_g_per_100g": {"type": "number"},
+                },
+                "required": [
+                    "name", "weight_g", "kcal_per_100g", "protein_g_per_100g",
+                    "fat_g_per_100g", "carbs_g_per_100g", "sugar_g_per_100g",
+                    "fiber_g_per_100g",
+                ],
+            },
+        },
+    },
+    "required": ["is_food", "food_name", "ingredients"],
+}
 
 FOOD_PROMPT = (
     "You are a cautious pediatric nutrition image analyst. Analyze only visible evidence. "
@@ -76,8 +107,9 @@ class AIService:
             contents=[FOOD_PROMPT, types.Part.from_bytes(data=image_bytes, mime_type=mime_type)],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=FoodDetectionResponse,
+                response_schema=FOOD_DETECTION_PROVIDER_SCHEMA,
                 temperature=0.2,
+                automatic_function_calling=NO_AUTO_FUNCTION_CALLING,
             ),
         )
         return json.loads(response.text)
@@ -144,7 +176,9 @@ class AIService:
             model=self.medicine_model_name,
             contents=[MEDICINE_PROMPT, types.Part.from_bytes(data=image_bytes, mime_type=mime_type)],
             config=types.GenerateContentConfig(
-                response_mime_type="application/json", temperature=0.1
+                response_mime_type="application/json",
+                temperature=0.1,
+                automatic_function_calling=NO_AUTO_FUNCTION_CALLING,
             ),
         )
         return json.loads(response.text)

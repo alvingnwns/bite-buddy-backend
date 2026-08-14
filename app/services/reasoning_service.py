@@ -14,6 +14,7 @@ from app.services.food_data_service import get_food_data_service
 from app.services.openrouter_service import OpenRouterService
 
 logger = logging.getLogger(__name__)
+NO_AUTO_FUNCTION_CALLING = types.AutomaticFunctionCallingConfig(disable=True)
 
 class MealEvaluation(BaseModel):
     is_healthy: bool = Field(description="Apakah makanan ini tergolong sehat untuk penderita diabetes/anak-anak secara umum?")
@@ -71,6 +72,7 @@ class ReasoningService:
                         response_mime_type="application/json",
                         response_schema=MealEvaluation,
                         temperature=0.3,
+                        automatic_function_calling=NO_AUTO_FUNCTION_CALLING,
                     ),
                 )
                 return MealEvaluation.model_validate_json(response.text).model_dump()

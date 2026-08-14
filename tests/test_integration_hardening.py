@@ -5,7 +5,7 @@ from fastapi import HTTPException
 
 from app.api.v1 import children
 from app.core import auth
-from app.services.ai_service import AIService
+from app.services.ai_service import AIService, FOOD_DETECTION_PROVIDER_SCHEMA
 from app.services.doctor_ai_service import DOCTOR_SUMMARY_PROVIDER_SCHEMA
 
 
@@ -87,6 +87,11 @@ def test_doctor_ai_provider_schema_avoids_unsupported_legacy_sdk_keywords():
     schema_text = str(DOCTOR_SUMMARY_PROVIDER_SCHEMA)
     assert "maxLength" not in schema_text
     assert "maxItems" not in schema_text
+
+
+def test_food_ai_provider_schema_avoids_google_genai_unsupported_constraints():
+    schema_text = str(FOOD_DETECTION_PROVIDER_SCHEMA)
+    assert "exclusiveMinimum" not in schema_text
 
 
 def test_missing_jwt_secret_uses_supabase_token_verification(monkeypatch):

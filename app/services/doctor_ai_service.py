@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.services.openrouter_service import OpenRouterService
 
 logger = logging.getLogger(__name__)
+NO_AUTO_FUNCTION_CALLING = types.AutomaticFunctionCallingConfig(disable=True)
 
 
 class DoctorAiUnavailable(RuntimeError):
@@ -55,6 +56,7 @@ async def generate_doctor_summary(source: dict[str, Any]) -> DoctorSummary:
                     response_mime_type="application/json",
                     response_schema=DOCTOR_SUMMARY_PROVIDER_SCHEMA,
                     temperature=0.2,
+                    automatic_function_calling=NO_AUTO_FUNCTION_CALLING,
                 ),
             )
             return DoctorSummary.model_validate_json(response.text)

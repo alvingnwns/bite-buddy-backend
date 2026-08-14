@@ -7,7 +7,8 @@ from app.core.supabase import get_supabase_service_client
 from app.services.gamification_service import GamificationService
 from app.services.activity_service import record_activity
 
-logger = logging.getLogger(__name__)
+# Keep scheduled-job evidence visible in Railway Deploy Logs.
+logger = logging.getLogger("uvicorn.error")
 
 def check_daily_compliance() -> None:
     """
