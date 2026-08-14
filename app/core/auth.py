@@ -21,10 +21,11 @@ def decode_jwt(token: str) -> Dict[str, Any]:
     """
     if not settings.supabase_jwt_secret:
         try:
-            response = get_supabase_service_client().auth.get_user(token)
-            if not response.user:
-                raise ValueError("Supabase did not return a user")
-            return {"sub": str(response.user.id)}
+            response = get_supabase_service_client().auth.get_claims(token)
+            claims = dict(response.claims) if response and response.claims else {}
+            if not claims.get("sub"):
+                raise ValueError("Supabase did not return verified claims")
+            return claims
         except Exception:
             raise api_error(401, "authentication_required", "Authentication is required.")
         

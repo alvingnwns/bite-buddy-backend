@@ -93,16 +93,18 @@ def test_missing_jwt_secret_uses_supabase_token_verification(monkeypatch):
     verified = []
 
     class Auth:
-        def get_user(self, token):
+        def get_claims(self, token):
             verified.append(token)
-            return SimpleNamespace(user=SimpleNamespace(id="verified-user"))
+            return SimpleNamespace(claims={"sub": "verified-user", "role": "authenticated"})
 
     monkeypatch.setattr(auth.settings, "supabase_jwt_secret", "")
     monkeypatch.setattr(
         auth, "get_supabase_service_client", lambda: SimpleNamespace(auth=Auth()),
     )
 
-    assert auth.decode_jwt("signed-token") == {"sub": "verified-user"}
+    assert auth.decode_jwt("signed-token") == {
+        "sub": "verified-user", "role": "authenticated",
+    }
     assert verified == ["signed-token"]
 
 

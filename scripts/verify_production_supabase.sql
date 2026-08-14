@@ -1,4 +1,4 @@
--- Read-only production audit. Run as one statement in Supabase SQL Editor.
+-- Read-only production audit. Run as one statement after migrations 001-021.
 
 WITH
 required_tables(name) AS (
@@ -27,6 +27,9 @@ rls_tables(name) AS (
 ),
 required_buckets(id) AS (
     VALUES ('food-photos'), ('medicine-photos')
+),
+required_storage_policies(name) AS (
+    VALUES ('bitebuddy_food_photos_read'), ('bitebuddy_medicine_photos_read')
 ),
 audit AS (
     SELECT
@@ -92,6 +95,34 @@ audit AS (
     UNION ALL
 
     SELECT
+        'storage_policies',
+        COALESCE(
+            'MISSING: ' || string_agg(required.name, ', ' ORDER BY required.name),
+            'OK'
+        )
+    FROM required_storage_policies AS required
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM pg_policies
+        WHERE schemaname = 'storage'
+          AND tablename = 'objects'
+          AND policyname = required.name
+    )
+
+    UNION ALL
+
+    SELECT
+        'storage_bucket_visibility',
+        COALESCE(
+            string_agg(id || '=' || CASE WHEN public THEN 'public' ELSE 'private' END, ', ' ORDER BY id),
+            'MISSING'
+        )
+    FROM storage.buckets
+    WHERE id IN ('food-photos', 'medicine-photos')
+
+    UNION ALL
+
+    SELECT
         'activity_partitions',
         COALESCE(string_agg(child.relname, ', ' ORDER BY child.relname), 'MISSING')
     FROM pg_inherits
@@ -99,11 +130,6 @@ audit AS (
     JOIN pg_class AS child ON child.oid = pg_inherits.inhrelid
     JOIN pg_namespace ON pg_namespace.oid = parent.relnamespace
     WHERE pg_namespace.nspname = 'public' AND parent.relname = 'activity_logs'
-
-    UNION ALL
-
-    SELECT 'nutrition_row_count', count(*)::text
-    FROM public.nutrition_database
 
     UNION ALL
 
