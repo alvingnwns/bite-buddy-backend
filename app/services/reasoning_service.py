@@ -1,5 +1,6 @@
 """Service untuk Multimodal Reasoning (menghitung nutrisi dan mengevaluasi kesehatan makanan)."""
 
+import asyncio
 import json
 import logging
 from typing import Any, Dict, List, Optional
@@ -10,6 +11,7 @@ from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
+from app.services.ai_service import _race_tasks
 from app.services.food_data_service import get_food_data_service
 from app.services.openrouter_service import OpenRouterService
 
@@ -61,30 +63,37 @@ class ReasoningService:
             "and a short Indonesian explanation suitable for a child and parent."
         )
 
-        if self.api_key:
-            try:
-                if self.gemini is None:
-                    raise RuntimeError("Gemini is not configured")
-                response = await self.gemini.aio.models.generate_content(
-                    model=self.nutrition_model_name,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=MealEvaluation,
-                        temperature=0.3,
-                        automatic_function_calling=NO_AUTO_FUNCTION_CALLING,
-                    ),
-                )
-                return MealEvaluation.model_validate_json(response.text).model_dump()
-            except Exception:
-                logger.warning("Gemini meal evaluation failed; trying Qwen fallback", exc_info=True)
+        tasks: list[asyncio.Task[Dict[str, Any]]] = []
 
+        async def _gemini_call() -> Dict[str, Any]:
+            if self.gemini is None:
+                raise RuntimeError("Gemini is not configured")
+            response = await self.gemini.aio.models.generate_content(
+                model=self.nutrition_model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=MealEvaluation,
+                    temperature=0.3,
+                    automatic_function_calling=NO_AUTO_FUNCTION_CALLING,
+                ),
+            )
+            return MealEvaluation.model_validate_json(response.text).model_dump()
+
+        async def _openrouter_call() -> Dict[str, Any]:
+            raw = await self.openrouter.complete_json(prompt, temperature=0.3)
+            return MealEvaluation.model_validate(raw).model_dump()
+
+        if self.api_key:
+            tasks.append(asyncio.create_task(_gemini_call()))
         if self.openrouter.configured:
+            tasks.append(asyncio.create_task(_openrouter_call()))
+
+        if tasks:
             try:
-                raw = await self.openrouter.complete_json(prompt, temperature=0.3)
-                return MealEvaluation.model_validate(raw).model_dump()
+                return await _race_tasks(tasks)
             except Exception:
-                logger.exception("Qwen meal evaluation fallback failed")
+                logger.warning("All meal evaluation AI providers failed; falling back to rule-based evaluation", exc_info=True)
 
         is_healthy = totals.get("sugar_g", 0) < 15 and totals.get("fiber_g", 0) > 2
         return {

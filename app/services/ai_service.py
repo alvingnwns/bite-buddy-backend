@@ -1,7 +1,9 @@
 """Multimodal AI with Gemini primary and OpenRouter Qwen fallback."""
 
+import asyncio
 import json
 import logging
+import re
 from typing import Any
 
 from google import genai
@@ -89,6 +91,64 @@ MEDICINE_PROMPT = (
     "'medicine'; otherwise use 'Unknown Medicine'. Do not classify food, animals, or people as medicine."
 )
 
+MEDICINE_DETECTION_PROVIDER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "is_medicine": {"type": "boolean"},
+        "detected": {
+            "type": "string",
+            "enum": ["insulin pen", "medicine", "Unknown Medicine", "None"],
+        },
+    },
+    "required": ["is_medicine", "detected"],
+}
+
+
+def _clean_json_loads(content: str | None) -> dict[str, Any]:
+    if not content:
+        raise ValueError("Model returned empty content.")
+    text = content.strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
+    if fenced:
+        text = fenced.group(1).strip()
+    elif text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
+        text = text.strip()
+    try:
+        value = json.loads(text)
+    except Exception:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            value = json.loads(match.group(0))
+        else:
+            raise
+    if not isinstance(value, dict):
+        raise ValueError("Response must be a JSON object.")
+    return value
+
+
+async def _race_tasks(tasks: list[asyncio.Task[Any]]) -> Any:
+    """Run multiple provider tasks concurrently; return the first successful result."""
+    pending = set(tasks)
+    last_error: Exception | None = None
+
+    while pending:
+        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            try:
+                result = task.result()
+                for remaining in pending:
+                    remaining.cancel()
+                return result
+            except Exception as exc:
+                last_error = exc
+                logger.warning("AI provider task failed during concurrent execution: %s", exc)
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("No AI provider completed successfully.")
+
 
 class AIService:
     def __init__(self) -> None:
@@ -112,7 +172,7 @@ class AIService:
                 automatic_function_calling=NO_AUTO_FUNCTION_CALLING,
             ),
         )
-        return json.loads(response.text)
+        return _clean_json_loads(response.text)
 
     async def _fallback_food(self, image_bytes: bytes, mime_type: str) -> dict[str, Any]:
         return await self.openrouter.complete_json(
@@ -153,21 +213,27 @@ class AIService:
     async def detect_food_ingredients(
         self, image_bytes: bytes, mime_type: str = "image/jpeg"
     ) -> tuple[bool, str, list[dict[str, Any]]]:
-        errors: list[Exception] = []
+        tasks: list[asyncio.Task[dict[str, Any]]] = []
         if self.api_key:
-            try:
-                return self._map_food(await self._gemini_food(image_bytes, mime_type))
-            except Exception as exc:
-                errors.append(exc)
-                logger.warning("Gemini food analysis failed; trying Qwen fallback", exc_info=True)
+            tasks.append(asyncio.create_task(self._gemini_food(image_bytes, mime_type)))
         if self.openrouter.configured:
-            try:
-                return self._map_food(await self._fallback_food(image_bytes, mime_type))
-            except Exception as exc:
-                errors.append(exc)
-                logger.exception("Qwen food analysis fallback failed")
-        detail = "AI providers are temporarily unavailable." if errors else "AI provider is not configured."
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
+            tasks.append(asyncio.create_task(self._fallback_food(image_bytes, mime_type)))
+
+        if not tasks:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="AI provider is not configured.",
+            )
+
+        try:
+            raw = await _race_tasks(tasks)
+            return self._map_food(raw)
+        except Exception:
+            logger.exception("All food analysis AI providers failed")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="AI providers are temporarily unavailable.",
+            )
 
     async def _gemini_medicine(self, image_bytes: bytes, mime_type: str) -> dict[str, Any]:
         if self.gemini is None:
@@ -177,31 +243,37 @@ class AIService:
             contents=[MEDICINE_PROMPT, types.Part.from_bytes(data=image_bytes, mime_type=mime_type)],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
+                response_schema=MEDICINE_DETECTION_PROVIDER_SCHEMA,
                 temperature=0.1,
                 automatic_function_calling=NO_AUTO_FUNCTION_CALLING,
             ),
         )
-        return json.loads(response.text)
+        return _clean_json_loads(response.text)
 
     async def detect_medicine(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> dict[str, Any]:
-        errors: list[Exception] = []
+        tasks: list[asyncio.Task[dict[str, Any]]] = []
         if self.api_key:
-            try:
-                return self._normalize_medicine(await self._gemini_medicine(image_bytes, mime_type))
-            except Exception as exc:
-                errors.append(exc)
-                logger.warning("Gemini medicine analysis failed; trying Qwen fallback", exc_info=True)
+            tasks.append(asyncio.create_task(self._gemini_medicine(image_bytes, mime_type)))
         if self.openrouter.configured:
-            try:
-                raw = await self.openrouter.complete_json(
-                    MEDICINE_PROMPT, image_bytes=image_bytes, mime_type=mime_type, temperature=0.1
-                )
-                return self._normalize_medicine(raw)
-            except Exception as exc:
-                errors.append(exc)
-                logger.exception("Qwen medicine analysis fallback failed")
-        detail = "AI providers are temporarily unavailable." if errors else "AI provider is not configured."
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
+            tasks.append(asyncio.create_task(self.openrouter.complete_json(
+                MEDICINE_PROMPT, image_bytes=image_bytes, mime_type=mime_type, temperature=0.1
+            )))
+
+        if not tasks:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="AI provider is not configured.",
+            )
+
+        try:
+            raw = await _race_tasks(tasks)
+            return self._normalize_medicine(raw)
+        except Exception:
+            logger.exception("All medicine analysis AI providers failed")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="AI providers are temporarily unavailable.",
+            )
 
     @staticmethod
     def _normalize_medicine(raw: dict[str, Any]) -> dict[str, Any]:
